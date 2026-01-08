@@ -381,7 +381,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let status = await SetupManager.shared.checkSetup()
 
         if status == .notInstalled || status == .needsUpdate {
-            showOnboardingWindow()
+            // Auto-install hooks silently
+            let success = await SetupManager.shared.installHooks()
+
+            // Only show onboarding if installation failed
+            if !success {
+                showOnboardingWindow()
+            }
         }
     }
 

@@ -47,6 +47,11 @@ Download the latest `.dmg` from [Releases](https://github.com/ojowwalker77/cooki
 - Context window usage
 - Activity patterns
 
+## Documentation
+
+- [Hooks Configuration](docs/hooks.md) - How Claude Code hooks work
+- [Slash Commands](docs/skills.md) - `/send-to-notch` and `/remove-from-notch`
+
 ## Requirements
 
 - macOS 15.0 (Sequoia) or later
