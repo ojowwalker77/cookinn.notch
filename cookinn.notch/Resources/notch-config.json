@@ -1,0 +1,195 @@
+{
+  "version": "2.0",
+
+  "design_system": {
+    "philosophy": "thermal_flow",
+    "principle": "cool_observes_hot_acts"
+  },
+
+  "categories": {
+    "observe": {
+      "description": "Reading, searching - safe, no changes",
+      "color": "cyan",
+      "pattern": "scan",
+      "intensity": 1,
+      "attention": "peripheral"
+    },
+    "think": {
+      "description": "Processing, reasoning - internal work",
+      "color": "orange",
+      "pattern": "cogitate",
+      "intensity": 2,
+      "attention": "ambient"
+    },
+    "create": {
+      "description": "Writing new - additive changes",
+      "color": "green",
+      "pattern": "compose",
+      "intensity": 2,
+      "attention": "ambient"
+    },
+    "transform": {
+      "description": "Editing existing - modifying",
+      "color": "amber",
+      "pattern": "spark",
+      "intensity": 3,
+      "attention": "focal"
+    },
+    "execute": {
+      "description": "Running commands - system level",
+      "color": "red",
+      "pattern": "chaos",
+      "intensity": 4,
+      "attention": "focal"
+    },
+    "connect": {
+      "description": "External world - network, APIs",
+      "color": "violet",
+      "pattern": "reach",
+      "intensity": 2,
+      "attention": "ambient"
+    },
+    "interact": {
+      "description": "Needs you - attention required",
+      "color": "blue",
+      "pattern": "beacon",
+      "intensity": 4,
+      "attention": "urgent"
+    }
+  },
+
+  "tools": {
+    "read":            { "category": "observe",   "displayName": "Perusing" },
+    "glob":            { "category": "observe",   "displayName": "Scouting" },
+    "grep":            { "category": "observe",   "displayName": "Hunting" },
+    "todoread":        { "category": "observe",   "displayName": "Reviewing" },
+
+    "task":            { "category": "think",     "displayName": "Spawning" },
+
+    "write":           { "category": "create",    "displayName": "Crafting" },
+    "todowrite":       { "category": "create",    "displayName": "Plotting" },
+
+    "edit":            { "category": "transform", "displayName": "Sculpting" },
+    "notebookedit":    { "category": "transform", "displayName": "Tinkering" },
+
+    "bash":            { "category": "execute",   "displayName": "Invoking" },
+
+    "webfetch":        { "category": "connect",   "displayName": "Fetching" },
+    "websearch":       { "category": "connect",   "displayName": "Scouring" },
+    "mcp":             { "category": "connect",   "displayName": "Channeling" },
+    "skill":           { "category": "connect",   "displayName": "Conjuring" },
+
+    "askuserquestion": { "category": "interact",  "displayName": "Inquiring" }
+  },
+
+  "states": {
+    "thinking": {
+      "category": "think",
+      "displayName": "Thinking",
+      "noTimeout": true,
+      "funVerbs": [
+        "Pondering", "Mulling", "Cogitating", "Ruminating", "Deliberating",
+        "Contemplating", "Musing", "Noodling", "Percolating", "Brewing",
+        "Marinating", "Simmering", "Stewing", "Gestating", "Incubating",
+        "Churning", "Synthesizing", "Crystallizing", "Untangling", "Weaving"
+      ]
+    },
+    "waiting":  { "category": "interact", "displayName": "Waiting" },
+    "idle":     { "color": "slate", "pattern": "dormant", "displayName": "Idle" }
+  },
+
+  "patterns": {
+    "scan": {
+      "description": "Left-to-right seeking",
+      "mode": "sequence",
+      "sequence": [[0,3], [1,4], [2,5], [1,4]],
+      "interval": 0.12
+    },
+    "cogitate": {
+      "description": "Fast neural sparks - confident thinking",
+      "mode": "random",
+      "litRange": [2, 5],
+      "interval": 0.05
+    },
+    "compose": {
+      "description": "Gentle flowing build - calm writing",
+      "mode": "sequence",
+      "sequence": [[3], [3,4], [4], [4,5], [5], [5,2], [2], [2,1], [1], [1,0], [0], [0,3]],
+      "interval": 0.18
+    },
+    "breathe": {
+      "description": "All squares pulse together",
+      "mode": "breathe",
+      "interval": 0.8
+    },
+    "flow": {
+      "description": "Build left-to-right on bottom",
+      "mode": "sequence",
+      "sequence": [[3], [3,4], [3,4,5], [4,5], [5], []],
+      "interval": 0.1
+    },
+    "spark": {
+      "description": "Quick random flashes",
+      "mode": "random",
+      "litRange": [2, 4],
+      "interval": 0.06
+    },
+    "chaos": {
+      "description": "Unpredictable rapid",
+      "mode": "random",
+      "litRange": [3, 5],
+      "interval": 0.04
+    },
+    "reach": {
+      "description": "Pulse outward from center",
+      "mode": "sequence",
+      "sequence": [[1,4], [0,1,2,3,4,5], [1,4], []],
+      "interval": 0.25
+    },
+    "beacon": {
+      "description": "Center pulses for attention",
+      "mode": "sequence",
+      "sequence": [[1,4], [], [1,4], []],
+      "interval": 0.4
+    },
+    "dormant": {
+      "description": "Minimal corner glow",
+      "mode": "static",
+      "sequence": [[0,5]],
+      "interval": 0
+    }
+  },
+
+  "colors": {
+    "cyan":   { "hex": "#00D4E4", "swiftUI": "cyan" },
+    "purple": { "hex": "#A855F7", "swiftUI": "purple" },
+    "green":  { "hex": "#22C55E", "swiftUI": "green" },
+    "amber":  { "hex": "#F59E0B", "swiftUI": "yellow" },
+    "orange": { "hex": "#F97316", "swiftUI": "orange" },
+    "red":    { "hex": "#EF4444", "swiftUI": "red" },
+    "violet": { "hex": "#8B5CF6", "swiftUI": "indigo" },
+    "blue":   { "hex": "#3B82F6", "swiftUI": "blue" },
+    "slate":  { "hex": "#64748B", "swiftUI": "gray" }
+  },
+
+  "attention_levels": {
+    "peripheral": { "opacity": [0.4, 0.6] },
+    "ambient":    { "opacity": [0.6, 0.85] },
+    "focal":      { "opacity": [0.8, 1.0] },
+    "urgent":     { "opacity": [0.9, 1.0], "pulse": true }
+  },
+
+  "duration_evolution": {
+    "normal":   { "until": 5,    "speedMult": 1.0 },
+    "extended": { "until": 30,   "speedMult": 0.7 },
+    "long":     { "until": 120,  "speedMult": 0.5 },
+    "stuck":    { "until": null, "speedMult": 0.3 }
+  },
+
+  "defaults": {
+    "unknownTool": { "category": "think", "displayName": "Working" },
+    "activityTimeout": 60,
+    "idleTimeout": 15,
+    "gracePeriod": 3
+  }
+}
