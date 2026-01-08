@@ -92,10 +92,9 @@ struct SessionCard: View {
     @State private var currentFunVerb: String = "Thinking"
     @State private var verbColorPhase: Double = 0.0
 
-    // Timer for rotating fun verbs (every 3-5 seconds)
-    private let verbTimer = Timer.publish(every: 4.0, on: .main, in: .common).autoconnect()
-    // Timer for color animation (smooth continuous)
-    private let colorTimer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
+    // Managed timer cancellables (to prevent leaks)
+    @State private var verbTimerCancellable: AnyCancellable?
+    @State private var colorTimerCancellable: AnyCancellable?
 
     private var isThinking: Bool {
         guard let session = session else { return false }
@@ -163,33 +162,71 @@ struct SessionCard: View {
             ContextBorder(percent: contextPercent, cornerRadius: cornerRadius, color: activeColor)
         )
         .frame(maxWidth: .infinity, alignment: .trailing)
-        .onReceive(verbTimer) { _ in
-            guard isThinking else { return }
-            // Rotate to a new fun verb
-            if let newVerb = ConfigManager.shared.randomFunVerb(for: "thinking"),
-               newVerb != currentFunVerb {
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    currentFunVerb = newVerb
-                }
-            }
-        }
-        .onReceive(colorTimer) { _ in
-            // Animate color phase for verb text
-            guard session?.isActive == true || session?.activeTool != nil else { return }
-            verbColorPhase += 0.02
-            if verbColorPhase > 1.0 { verbColorPhase = 0.0 }
-        }
         .onChange(of: session?.isActive) { _, isActive in
             // Reset verb when thinking starts
             if isActive == true && session?.activeTool == nil {
                 currentFunVerb = ConfigManager.shared.randomFunVerb(for: "thinking") ?? "Thinking"
             }
+            // Restart timers when activity state changes
+            updateTimers()
+        }
+        .onChange(of: session?.activeTool?.id) { _, _ in
+            updateTimers()
         }
         .onAppear {
             // Initialize with a fun verb
             if isThinking {
                 currentFunVerb = ConfigManager.shared.randomFunVerb(for: "thinking") ?? "Thinking"
             }
+            startTimers()
+        }
+        .onDisappear {
+            stopTimers()
+        }
+    }
+
+    private func startTimers() {
+        // Verb rotation timer (only when thinking)
+        if verbTimerCancellable == nil {
+            verbTimerCancellable = Timer.publish(every: 4.0, on: .main, in: .common)
+                .autoconnect()
+                .sink { _ in
+                    guard self.isThinking else { return }
+                    if let newVerb = ConfigManager.shared.randomFunVerb(for: "thinking"),
+                       newVerb != currentFunVerb {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            currentFunVerb = newVerb
+                        }
+                    }
+                }
+        }
+
+        // Color animation timer
+        if colorTimerCancellable == nil {
+            colorTimerCancellable = Timer.publish(every: 0.05, on: .main, in: .common)
+                .autoconnect()
+                .sink { _ in
+                    guard self.session?.isActive == true || self.session?.activeTool != nil else { return }
+                    verbColorPhase += 0.02
+                    if verbColorPhase > 1.0 { verbColorPhase = 0.0 }
+                }
+        }
+    }
+
+    private func stopTimers() {
+        verbTimerCancellable?.cancel()
+        verbTimerCancellable = nil
+        colorTimerCancellable?.cancel()
+        colorTimerCancellable = nil
+    }
+
+    private func updateTimers() {
+        // Start or stop timers based on current state
+        let needsTimers = session?.isActive == true || session?.activeTool != nil
+        if needsTimers && verbTimerCancellable == nil {
+            startTimers()
+        } else if !needsTimers && verbTimerCancellable != nil {
+            stopTimers()
         }
     }
 
@@ -276,8 +313,8 @@ struct ActivityIndicator: View {
     @State private var breatheOpacity: Double = 0.3
     @State private var lastUpdate: Date = Date()
 
-    // Base timer - actual interval controlled by pattern
-    private let timer = Timer.publish(every: 0.04, on: .main, in: .common).autoconnect()
+    // Managed timer cancellable (to prevent leaks)
+    @State private var animationTimerCancellable: AnyCancellable?
 
     private let squareSize: CGFloat = 5
     private let spacing: CGFloat = 2
@@ -351,27 +388,46 @@ struct ActivityIndicator: View {
                 }
             }
         }
-        .onReceive(timer) { now in
-            guard shouldAnimate else {
-                if !litSquares.isEmpty {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        litSquares.removeAll()
-                    }
-                }
-                return
-            }
-
-            // Check if enough time has passed based on pattern interval (with duration evolution)
-            guard now.timeIntervalSince(lastUpdate) >= effectiveInterval else { return }
-            lastUpdate = now
-
-            updatePattern()
-        }
         .onChange(of: patternName) { _, _ in
             // Reset when pattern changes
             sequenceIndex = 0
             lastUpdate = Date()
         }
+        .onChange(of: shouldAnimate) { _, newValue in
+            if newValue {
+                startAnimationTimer()
+            } else {
+                // Clear lit squares when stopping
+                withAnimation(.easeOut(duration: 0.2)) {
+                    litSquares.removeAll()
+                }
+            }
+        }
+        .onAppear {
+            if shouldAnimate {
+                startAnimationTimer()
+            }
+        }
+        .onDisappear {
+            stopAnimationTimer()
+        }
+    }
+
+    private func startAnimationTimer() {
+        guard animationTimerCancellable == nil else { return }
+        animationTimerCancellable = Timer.publish(every: 0.04, on: .main, in: .common)
+            .autoconnect()
+            .sink { now in
+                guard self.shouldAnimate else { return }
+                guard now.timeIntervalSince(lastUpdate) >= effectiveInterval else { return }
+                lastUpdate = now
+                updatePattern()
+            }
+    }
+
+    private func stopAnimationTimer() {
+        animationTimerCancellable?.cancel()
+        animationTimerCancellable = nil
     }
 
     // MARK: - Pattern Logic
