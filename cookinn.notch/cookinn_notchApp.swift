@@ -9,6 +9,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import ServiceManagement
 
 @main
 struct cookinn_notchApp: App {
@@ -28,9 +29,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var statusItem: NSStatusItem?
     var onboardingWindow: NSWindow?
     private var hasCheckedSetup = false
+    private let openAtLoginPromptedKey = "NotchHasPromptedOpenAtLogin"
     private var cancellables = Set<AnyCancellable>()
     private var mouseMonitor: Any?
     private var screenObserver: Any?
+    private var statusUpdateTimer: Timer?
+    private var lastMouseUpdate: Date = .distantPast
+    private let mouseUpdateInterval: TimeInterval = 0.016  // ~60fps throttle
 
     // Notch dimensions (measured from screen)
     private var notchWidth: CGFloat = 180
@@ -43,6 +48,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Check setup status and show onboarding if needed
         Task { @MainActor in
             await checkAndShowOnboarding()
+            promptOpenAtLoginIfNeeded()
         }
 
         // Continue with normal setup
@@ -56,6 +62,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        statusUpdateTimer?.invalidate()
         if let monitor = mouseMonitor {
             NSEvent.removeMonitor(monitor)
         }
@@ -98,11 +105,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(NSMenuItem(title: "Clear All", action: #selector(clearAllPinned), keyEquivalent: "k"))
         menu.addItem(NSMenuItem.separator())
 
-        // Settings
-        let allMonitorsItem = NSMenuItem(title: "Show on All Monitors", action: #selector(toggleAllMonitors), keyEquivalent: "m")
-        allMonitorsItem.tag = 101
-        allMonitorsItem.state = NotchState.shared.showOnAllMonitors ? .on : .off
-        menu.addItem(allMonitorsItem)
+        // Display submenu
+        let displayMenu = NSMenu(title: "Display")
+        let displaySubmenuItem = NSMenuItem(title: "Display", action: nil, keyEquivalent: "m")
+        displaySubmenuItem.tag = 101
+        displaySubmenuItem.submenu = displayMenu
+        menu.addItem(displaySubmenuItem)
+
+        let openAtLoginItem = NSMenuItem(title: "Open at Login", action: #selector(toggleOpenAtLogin), keyEquivalent: "")
+        openAtLoginItem.tag = 102
+        openAtLoginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        menu.addItem(openAtLoginItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -116,7 +129,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         self.statusItem?.menu = menu
 
-        // Update status periodically
+        // Populate display menu and start status updates
+        updateDisplayMenu()
+        startStatusUpdates()
+    }
+
+    private func startStatusUpdates() {
+        statusUpdateTimer?.invalidate()
+        statusUpdateTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.updateStatusMenuItem()
+        }
         updateStatusMenuItem()
     }
 
@@ -144,11 +166,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         statusMenuItem.title = parts.joined(separator: " | ")
-
-        // Schedule next update
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            self?.updateStatusMenuItem()
-        }
     }
 
     // MARK: - Multi-Display Support
@@ -166,12 +183,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         notchWindows.values.forEach { $0.orderOut(nil) }
         notchWindows.removeAll()
 
+        let state = NotchState.shared
+
         // Determine which screens to use
         let screens: [NSScreen]
-        if NotchState.shared.showOnAllMonitors {
+        if state.showOnAllMonitors {
             screens = NSScreen.screens
+        } else if let selected = state.selectedScreen {
+            // User selected a specific monitor
+            screens = [selected]
         } else {
-            // Just main screen
+            // Fallback: selected monitor disconnected, or nil (use main)
+            // Only reset if the selected display is actually disconnected (avoids recursive trigger)
+            if let currentID = state.selectedDisplayID,
+               !NSScreen.screens.contains(where: { getDisplayID(for: $0) == currentID }) {
+                state.selectedDisplayID = nil
+            }
             screens = NSScreen.main.map { [$0] } ?? []
         }
 
@@ -181,6 +208,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // Set up mouse tracking for all windows
         setupMouseTracking()
+
+        // Show windows immediately if there's active content
+        if !state.isIdle && !state.sessions.isEmpty {
+            notchWindows.values.forEach { $0.orderFrontRegardless() }
+        }
     }
 
     private func createWindowForScreen(_ screen: NSScreen) {
@@ -237,10 +269,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             queue: .main
         ) { [weak self] _ in
             self?.setupNotchWindows()
+            self?.updateDisplayMenu()
         }
 
-        // Also watch for the setting change
+        // Watch showOnAllMonitors changes
         NotchState.shared.$showOnAllMonitors
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.setupNotchWindows()
+            }
+            .store(in: &cancellables)
+
+        // Watch selectedDisplayID changes
+        NotchState.shared.$selectedDisplayID
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.setupNotchWindows()
@@ -258,20 +299,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
             guard let self = self else { return }
 
+            // Throttle: skip if too soon since last update (~60fps)
+            let now = Date()
+            guard now.timeIntervalSince(self.lastMouseUpdate) >= self.mouseUpdateInterval else { return }
+            self.lastMouseUpdate = now
+
             let mouseLocation = NSEvent.mouseLocation
 
             // Find the closest window to the mouse
             var closestWindow: NSWindow?
             var closestDistance: CGFloat = .greatestFiniteMagnitude
+            var isInExpandedFrame = false
 
             for window in self.notchWindows.values {
                 let windowFrame = window.frame
                 let expandedFrame = windowFrame.insetBy(dx: -50, dy: -50)
 
                 if expandedFrame.contains(mouseLocation) {
-                    let centerX = windowFrame.midX
-                    let centerY = windowFrame.midY
-                    let distance = hypot(mouseLocation.x - centerX, mouseLocation.y - centerY)
+                    isInExpandedFrame = true
+                    let distance = hypot(
+                        mouseLocation.x - windowFrame.midX,
+                        mouseLocation.y - windowFrame.midY
+                    )
                     if distance < closestDistance {
                         closestDistance = distance
                         closestWindow = window
@@ -279,17 +328,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
             }
 
-            Task { @MainActor in
+            // Only dispatch to main actor if near windows or state needs clearing
+            Task { @MainActor [mouseLocation, closestWindow, isInExpandedFrame] in
                 let state = NotchState.shared
 
                 if let window = closestWindow {
                     let windowFrame = window.frame
-                    // Store global screen coordinates (NotchView uses .global coordinate space)
-                    state.mousePosition = mouseLocation
-                    state.isHovered = windowFrame.contains(mouseLocation)
+                    let newHovered = windowFrame.contains(mouseLocation)
+                    // Only update if values actually changed
+                    if state.mousePosition != mouseLocation { state.mousePosition = mouseLocation }
+                    if state.isHovered != newHovered { state.isHovered = newHovered }
+                } else if isInExpandedFrame {
+                    if state.mousePosition != mouseLocation { state.mousePosition = mouseLocation }
+                    if state.isHovered { state.isHovered = false }
                 } else {
-                    state.mousePosition = nil
-                    state.isHovered = false
+                    // Only update if currently set (avoid unnecessary updates)
+                    if state.mousePosition != nil { state.mousePosition = nil }
+                    if state.isHovered { state.isHovered = false }
                 }
             }
         }
@@ -357,14 +412,88 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NotchState.shared.pinnedProjectPaths.removeAll()
     }
 
-    @objc func toggleAllMonitors() {
+    // MARK: - Display Selection
+
+    private func getDisplayID(for screen: NSScreen) -> UInt32 {
+        if let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
+            return number.uint32Value
+        }
+        return 0
+    }
+
+    private func updateDisplayMenu() {
+        guard let menu = statusItem?.menu,
+              let displayItem = menu.item(withTag: 101),
+              let displayMenu = displayItem.submenu else { return }
+
+        // Clear existing items
+        displayMenu.removeAllItems()
+
         let state = NotchState.shared
-        state.showOnAllMonitors.toggle()
+
+        // "All Monitors" option
+        let allMonitorsItem = NSMenuItem(title: "All Monitors", action: #selector(selectAllMonitors), keyEquivalent: "")
+        allMonitorsItem.tag = 1010
+        allMonitorsItem.state = state.showOnAllMonitors ? .on : .off
+        displayMenu.addItem(allMonitorsItem)
+
+        displayMenu.addItem(NSMenuItem.separator())
+
+        // Add each screen
+        for (index, screen) in NSScreen.screens.enumerated() {
+            let displayID = getDisplayID(for: screen)
+            let name = screen.localizedName
+
+            let item = NSMenuItem(
+                title: name,
+                action: #selector(selectDisplay(_:)),
+                keyEquivalent: ""
+            )
+            item.tag = 1011 + index
+            item.representedObject = displayID
+
+            // Checkmark if this is the selected display (and not "all monitors" mode)
+            let isSelected = !state.showOnAllMonitors && (
+                state.selectedDisplayID == displayID ||
+                (state.selectedDisplayID == nil && screen == NSScreen.main)
+            )
+            item.state = isSelected ? .on : .off
+
+            displayMenu.addItem(item)
+        }
+    }
+
+    @objc func selectAllMonitors() {
+        let state = NotchState.shared
+        state.showOnAllMonitors = true
+        state.selectedDisplayID = nil
+        updateDisplayMenu()
+    }
+
+    @objc func selectDisplay(_ sender: NSMenuItem) {
+        guard let displayID = sender.representedObject as? UInt32 else { return }
+
+        let state = NotchState.shared
+        state.showOnAllMonitors = false
+        state.selectedDisplayID = displayID
+        updateDisplayMenu()
+    }
+
+    @objc func toggleOpenAtLogin() {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            // Silent failure - user can manage via System Settings if needed
+        }
 
         // Update menu item checkmark
         if let menu = statusItem?.menu,
-           let item = menu.item(withTag: 101) {
-            item.state = state.showOnAllMonitors ? .on : .off
+           let item = menu.item(withTag: 102) {
+            item.state = SMAppService.mainApp.status == .enabled ? .on : .off
         }
     }
 
@@ -388,6 +517,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if !success {
                 showOnboardingWindow()
             }
+        }
+    }
+
+    private func promptOpenAtLoginIfNeeded() {
+        // Only prompt once ever
+        guard !UserDefaults.standard.bool(forKey: openAtLoginPromptedKey) else { return }
+
+        // Mark as prompted before showing (so we never ask again even if dismissed)
+        UserDefaults.standard.set(true, forKey: openAtLoginPromptedKey)
+
+        let alert = NSAlert()
+        alert.messageText = "Open at Login?"
+        alert.informativeText = "Would you like cookinn.notch to start automatically when you log in?"
+        alert.addButton(withTitle: "Enable")
+        alert.addButton(withTitle: "Not Now")
+        alert.alertStyle = .informational
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            try? SMAppService.mainApp.register()
         }
     }
 

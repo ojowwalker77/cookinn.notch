@@ -392,6 +392,7 @@ final class NotchState: ObservableObject {
     // UserDefaults keys for persistence
     private static let pinnedPathsKey = "NotchPinnedProjectPaths"
     private static let showOnAllMonitorsKey = "NotchShowOnAllMonitors"
+    private static let selectedDisplayIDKey = "NotchSelectedDisplayID"
     private var isLoadingSettings = false
 
     // Settings
@@ -399,6 +400,28 @@ final class NotchState: ObservableObject {
         didSet {
             guard !isLoadingSettings else { return }
             UserDefaults.standard.set(showOnAllMonitors, forKey: Self.showOnAllMonitorsKey)
+        }
+    }
+
+    @Published var selectedDisplayID: UInt32? = nil {
+        didSet {
+            guard !isLoadingSettings else { return }
+            if let id = selectedDisplayID {
+                // Safe: UInt32 (max ~4.3B) always fits in Int64 on 64-bit Macs
+                UserDefaults.standard.set(Int(id), forKey: Self.selectedDisplayIDKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.selectedDisplayIDKey)
+            }
+        }
+    }
+
+    var selectedScreen: NSScreen? {
+        guard let targetID = selectedDisplayID else { return nil }
+        return NSScreen.screens.first { screen in
+            if let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
+                return number.uint32Value == targetID
+            }
+            return false
         }
     }
 
@@ -467,6 +490,11 @@ final class NotchState: ObservableObject {
 
         // Load show on all monitors setting
         showOnAllMonitors = UserDefaults.standard.bool(forKey: Self.showOnAllMonitorsKey)
+
+        // Load selected display ID
+        if let savedID = UserDefaults.standard.object(forKey: Self.selectedDisplayIDKey) as? Int {
+            selectedDisplayID = UInt32(savedID)
+        }
 
         isLoadingSettings = false
     }
