@@ -2,6 +2,17 @@
 
 All notable changes to cookinn.notch will be documented in this file.
 
+## [0.1.3] - 2025-01-08
+
+### Added
+- Hover-to-fade: pills become nearly transparent (5% opacity) when mouse hovers over them
+- Click-through: mouse events pass through to windows below
+- Per-screen hover: each monitor's pills fade independently
+
+### Changed
+- Simplified hover detection (replaced proximity-based fade with direct hit testing)
+- Tighter hover area: only triggers on actual pill region, not full window
+
 ## [0.1.2] - 2025-01-08
 
 ### Added

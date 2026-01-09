@@ -252,7 +252,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             y: screenFrame.maxY - menuBarHeight - window.frame.height - paddingY
         ))
 
-        let contentView = NotchView()
+        let contentView = NotchView(displayID: displayID)
         window.contentView = NSHostingView(rootView: contentView)
 
         // Initially hidden
@@ -295,7 +295,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             NSEvent.removeMonitor(monitor)
         }
 
-        // Monitor global mouse movement for per-pill proximity fade
+        // Monitor global mouse movement for per-screen hover detection
         mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
             guard let self = self else { return }
 
@@ -305,46 +305,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.lastMouseUpdate = now
 
             let mouseLocation = NSEvent.mouseLocation
+            let windows = self.notchWindows  // Capture for async
 
-            // Find the closest window to the mouse
-            var closestWindow: NSWindow?
-            var closestDistance: CGFloat = .greatestFiniteMagnitude
-            var isInExpandedFrame = false
+            // Check each display independently
+            Task { @MainActor in
+                let state = NotchState.shared
+                var newHoveredIDs: Set<String> = []
 
-            for window in self.notchWindows.values {
-                let windowFrame = window.frame
-                let expandedFrame = windowFrame.insetBy(dx: -50, dy: -50)
-
-                if expandedFrame.contains(mouseLocation) {
-                    isInExpandedFrame = true
-                    let distance = hypot(
-                        mouseLocation.x - windowFrame.midX,
-                        mouseLocation.y - windowFrame.midY
+                for (displayID, window) in windows {
+                    let windowFrame = window.frame
+                    // Only check hover for top portion where pills are (~150px)
+                    let pillHeight: CGFloat = 150
+                    let pillFrame = CGRect(
+                        x: windowFrame.minX,
+                        y: windowFrame.maxY - pillHeight,
+                        width: windowFrame.width,
+                        height: pillHeight
                     )
-                    if distance < closestDistance {
-                        closestDistance = distance
-                        closestWindow = window
+                    if pillFrame.contains(mouseLocation) {
+                        newHoveredIDs.insert(displayID)
                     }
                 }
-            }
 
-            // Only dispatch to main actor if near windows or state needs clearing
-            Task { @MainActor [mouseLocation, closestWindow, isInExpandedFrame] in
-                let state = NotchState.shared
-
-                if let window = closestWindow {
-                    let windowFrame = window.frame
-                    let newHovered = windowFrame.contains(mouseLocation)
-                    // Only update if values actually changed
-                    if state.mousePosition != mouseLocation { state.mousePosition = mouseLocation }
-                    if state.isHovered != newHovered { state.isHovered = newHovered }
-                } else if isInExpandedFrame {
-                    if state.mousePosition != mouseLocation { state.mousePosition = mouseLocation }
-                    if state.isHovered { state.isHovered = false }
-                } else {
-                    // Only update if currently set (avoid unnecessary updates)
-                    if state.mousePosition != nil { state.mousePosition = nil }
-                    if state.isHovered { state.isHovered = false }
+                // Only update if changed
+                if state.hoveredDisplayIDs != newHoveredIDs {
+                    state.hoveredDisplayIDs = newHoveredIDs
                 }
             }
         }

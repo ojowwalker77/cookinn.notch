@@ -429,8 +429,7 @@ final class NotchState: ObservableObject {
     @Published var sessions: [String: SessionState] = [:]
     @Published var activeSessionId: String?
     @Published var isServerRunning: Bool = false
-    @Published var isHovered: Bool = false
-    @Published var mousePosition: CGPoint? = nil  // Global screen coordinates
+    @Published var hoveredDisplayIDs: Set<String> = []  // Per-screen hover state
     @Published var lastError: String?
     @Published var lastActivityTime: Date = Date()
     @Published var isIdle: Bool = true
