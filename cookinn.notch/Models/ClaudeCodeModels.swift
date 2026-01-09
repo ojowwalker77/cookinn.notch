@@ -617,16 +617,19 @@ final class NotchState: ObservableObject {
     }
 
     private func handleSessionStart(_ payload: HookPayload, sessionId: String, now: Date) {
-        let session = SessionState(
-            id: sessionId,
-            projectPath: payload.cwd ?? "",
-            projectName: payload.projectName ?? "",
-            permissionMode: payload.permissionMode ?? "default",
-            startTime: now,
-            lastActivityTime: now
-        )
-        sessions[sessionId] = session
+        ensureSession(payload, sessionId: sessionId, now: now)
         activeSessionId = sessionId
+
+        // Auto-pin on explicit SessionStart only
+        // /send-to-notch is fallback for re-pinning after removal
+        let cwd = payload.cwd ?? ""
+        if !cwd.isEmpty {
+            pinProjectPath(cwd)
+        } else {
+            // Edge case: SessionStart without cwd - log but don't fail
+            // User can still manually pin via /send-to-notch
+            print("[cookinn.notch] SessionStart without cwd for session \(sessionId) - manual pin required")
+        }
     }
 
     private func handleSessionEnd(sessionId: String) {
@@ -667,6 +670,7 @@ final class NotchState: ObservableObject {
                 lastActivityTime: now
             )
             sessions[sessionId] = session
+            // Note: No auto-pin here - only SessionStart triggers auto-pin
         }
     }
 

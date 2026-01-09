@@ -2,7 +2,16 @@
 
 All notable changes to cookinn.notch will be documented in this file.
 
-## [0.1.3] - 2025-01-08
+## [1.4] - 2025-01-09
+
+### Changed
+- Auto-pin: sessions automatically appear in notch on start
+- `/send-to-notch` is now fallback for re-pinning after removal
+
+### Fixed
+- App icon now on bundle (lol)
+
+## [1.3] - 2025-01-08
 
 ### Added
 - Hover-to-fade: pills become nearly transparent (5% opacity) when mouse hovers over them
@@ -13,7 +22,7 @@ All notable changes to cookinn.notch will be documented in this file.
 - Simplified hover detection (replaced proximity-based fade with direct hit testing)
 - Tighter hover area: only triggers on actual pill region, not full window
 
-## [0.1.2] - 2025-01-08
+## [1.2] - 2025-01-08
 
 ### Added
 - Monitor picker: select which display to show the notch on
@@ -23,7 +32,7 @@ All notable changes to cookinn.notch will be documented in this file.
 - Replaced "Show on All Monitors" toggle with Display submenu
 - Performance improvements for smoother animations
 
-## [0.1.1] - 2025-01-08
+## [1.1] - 2025-01-08
 
 ### Changed
 - Hooks now auto-install on first launch (no setup click required)
@@ -34,7 +43,7 @@ All notable changes to cookinn.notch will be documented in this file.
 - Documentation for hooks configuration (`docs/hooks.md`)
 - Documentation for slash commands (`docs/skills.md`)
 
-## [0.1.0] - 2025-01-08
+## [1.0] - 2025-01-08
 
 ### Added
 - Initial public release

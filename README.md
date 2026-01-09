@@ -1,17 +1,8 @@
 # cookinn.notch
 
-A minimal, essential companion for [Claude Code](https://claude.ai/code) on macOS. Shows what Claude is doing. Nothing more, nothing less.
-
-![macOS](https://img.shields.io/badge/macOS-15.0+-black?style=flat-square&logo=apple)
-![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
+A minimal companion for [Claude Code](https://claude.ai/code) on macOS. Shows what Claude is doing. Nothing more, nothing less.
 
 https://github.com/user-attachments/assets/74e9dfa9-52a3-435a-98ff-15dbf05fc3d7
-
-<img width="180" alt="cookinn.notch" src="https://github.com/user-attachments/assets/2c138551-eaef-433c-a116-cb9c9543c023" />
-
-## Philosophy
-
-This app shows the essential. No bloat, no extras, no distractions. Just real-time Claude Code activity in your menu bar.
 
 ## Installation
 
@@ -34,13 +25,15 @@ Download the latest `.dmg` from [Releases](https://github.com/ojowwalker77/cooki
 
 ## Usage
 
-### Pin a session
+Sessions automatically appear in notch when started. No setup needed.
+
+### Re-pin a session (after removal)
 
 ```
 /send-to-notch
 ```
 
-### Unpin
+### Remove from notch
 
 ```
 /remove-from-notch
