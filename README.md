@@ -22,6 +22,12 @@ brew tap ojowwalker77/cookinn-notch
 brew install --cask cookinn-notch
 ```
 
+### Update
+
+```bash
+brew update && brew upgrade cookinn-notch
+```
+
 ### Manual
 
 Download the latest `.dmg` from [Releases](https://github.com/ojowwalker77/cookinn.notch/releases).

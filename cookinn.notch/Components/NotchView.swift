@@ -12,10 +12,7 @@ import Combine
 
 struct NotchView: View {
     @ObservedObject var state = NotchState.shared
-
-    // Proximity fade settings (unified for all cards)
-    private let fadeRadius: CGFloat = 80
-    private let minOpacity: CGFloat = 0.3
+    let displayID: String
 
     // Get active sessions (up to 3) - ONLY shows pinned projects
     private var activeSessions: [SessionState] {
@@ -33,50 +30,24 @@ struct NotchView: View {
         return Array(sorted)
     }
 
-    var body: some View {
-        GeometryReader { geometry in
-            let frame = geometry.frame(in: .global)
-            let opacity = calculateOpacity(for: frame)
-
-            VStack(alignment: .trailing, spacing: 4) {
-                ForEach(activeSessions) { session in
-                    SessionCard(session: session)
-                }
-
-                if activeSessions.isEmpty {
-                    SessionCard(session: nil)
-                }
-            }
-            .opacity(opacity)
-            .animation(.easeOut(duration: 0.12), value: opacity)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        }
-        .padding(0)
-        .coordinateSpace(name: "notchWindow")
+    // Per-screen hover: only fade this screen's pills
+    private var opacity: Double {
+        state.hoveredDisplayIDs.contains(displayID) ? 0.05 : 1.0
     }
 
-    private func calculateOpacity(for frame: CGRect) -> Double {
-        guard let mouse = state.mousePosition else { return 1.0 }
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            ForEach(activeSessions) { session in
+                SessionCard(session: session)
+            }
 
-        // Calculate center of the entire notch area
-        let centerX = frame.midX
-        let centerY = frame.midY
-
-        // Distance from mouse to notch center
-        let dx = mouse.x - centerX
-        let dy = mouse.y - centerY
-        let distance = sqrt(dx * dx + dy * dy)
-
-        // If outside fade radius, full opacity
-        if distance > fadeRadius {
-            return 1.0
+            if activeSessions.isEmpty {
+                SessionCard(session: nil)
+            }
         }
-
-        // Linear fade: closer = more transparent
-        let fadeAmount = 1.0 - (distance / fadeRadius)
-        let opacity = 1.0 - (fadeAmount * (1.0 - minOpacity))
-
-        return max(minOpacity, min(1.0, opacity))
+        .opacity(opacity)
+        .animation(.easeOut(duration: 0.15), value: opacity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
 }
 
@@ -582,7 +553,7 @@ struct PillBorderPath: Shape {
 // MARK: - Preview
 
 #Preview("Session Cards") {
-    NotchView()
+    NotchView(displayID: "display-preview")
         .frame(width: 260, height: 140)
         .background(Color.gray.opacity(0.3))
 }

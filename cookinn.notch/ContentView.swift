@@ -9,7 +9,7 @@ import SwiftUI
 
 struct ContentView: View {
     var body: some View {
-        NotchView()
+        NotchView(displayID: "display-preview")
             .background(Color.clear)
     }
 }
