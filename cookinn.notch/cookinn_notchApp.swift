@@ -312,10 +312,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let state = NotchState.shared
                 var newHoveredIDs: Set<String> = []
 
+                // Calculate dynamic pill height based on pinned session count
+                let pinnedCount = state.sessions.values.filter { state.isProjectPinned($0.projectPath) }.count
+                let sessionCount = max(1, pinnedCount)  // At least 1 for idle pill
+                let sessionHeight: CGFloat = 42
+                let spacing: CGFloat = 4
+                let padding: CGFloat = 20
+                let pillHeight = CGFloat(sessionCount) * sessionHeight + CGFloat(sessionCount - 1) * spacing + padding
+
                 for (displayID, window) in windows {
                     let windowFrame = window.frame
-                    // Only check hover for top portion where pills are (~150px)
-                    let pillHeight: CGFloat = 150
                     let pillFrame = CGRect(
                         x: windowFrame.minX,
                         y: windowFrame.maxY - pillHeight,
