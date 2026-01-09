@@ -15,6 +15,7 @@ struct NotchView: View {
     let displayID: String
 
     // Get active sessions (up to 3) - ONLY shows pinned projects
+    // Limited to 3 to fit within hover detection area (150px)
     private var activeSessions: [SessionState] {
         // Only show sessions from pinned project paths
         let sessions = state.sessions.values.filter { state.isProjectPinned($0.projectPath) }
@@ -27,7 +28,7 @@ struct NotchView: View {
             if s2.isActive && !s1.isActive { return false }
             return s1.lastActivityTime > s2.lastActivityTime
         }
-        return Array(sorted)
+        return Array(sorted.prefix(3))
     }
 
     // Per-screen hover: only fade this screen's pills
