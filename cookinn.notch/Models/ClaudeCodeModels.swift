@@ -622,8 +622,13 @@ final class NotchState: ObservableObject {
 
         // Auto-pin on explicit SessionStart only
         // /send-to-notch is fallback for re-pinning after removal
-        if let cwd = payload.cwd, !cwd.isEmpty {
+        let cwd = payload.cwd ?? ""
+        if !cwd.isEmpty {
             pinProjectPath(cwd)
+        } else {
+            // Edge case: SessionStart without cwd - log but don't fail
+            // User can still manually pin via /send-to-notch
+            print("[cookinn.notch] SessionStart without cwd for session \(sessionId) - manual pin required")
         }
     }
 
