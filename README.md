@@ -15,6 +15,9 @@ brew install --cask cookinn-notch
 
 ### Update
 
+The app checks for updates automatically and notifies you in the menu bar. Click to update via Homebrew directly from the app.
+
+Manual update:
 ```bash
 brew update && brew upgrade cookinn-notch
 ```

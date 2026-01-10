@@ -2,6 +2,18 @@
 
 All notable changes to cookinn.notch will be documented in this file.
 
+## [1.6] - 2025-01-10
+
+### Added
+- **Update checker**: Menu shows version status and checks GitHub releases with one-click updates (runs homebrew command)
+- Falls back to GitHub releases page if Homebrew not installed
+
+### Fixed
+- **Stale sessions**: Old/orphaned sessions are automatically removed after 30 minutes of inactivity
+- **Duplicate pills**: Sessions in the same directory now show as a single pill (most active one wins)
+- **Lost state after alert**: Approving a permission request now transitions smoothly (no brief "Idle" flicker)
+- **Stuck "Thinking" on interrupt**: Interrupting Claude mid-thought now correctly goes to Idle after timeout
+
 ## [1.5] - 2025-01-09
 
 ### Added

@@ -14,20 +14,51 @@ struct NotchView: View {
     @ObservedObject var state = NotchState.shared
     let displayID: String
 
-    // Get active sessions (up to 3) - ONLY shows pinned projects
+    // Get active sessions (up to 3) - ONLY shows pinned projects, deduplicated by path
     private var activeSessions: [SessionState] {
         // Only show sessions from pinned project paths
-        let sessions = state.sessions.values.filter { state.isProjectPinned($0.projectPath) }
+        let pinnedSessions = state.sessions.values.filter { state.isProjectPinned($0.projectPath) }
 
-        let sorted = sessions.sorted { s1, s2 in
+        // Deduplicate by normalized projectPath - keep only the most active/recent session per path
+        // Using normalized paths ensures symlinks and different path representations are treated as same
+        var sessionsByPath: [String: SessionState] = [:]
+        for session in pinnedSessions {
+            let normalizedPath = state.normalizePath(session.projectPath)
+            if let existing = sessionsByPath[normalizedPath] {
+                // Keep the more active/recent session
+                let keepNew = Self.shouldPrefer(session, over: existing)
+                if keepNew {
+                    sessionsByPath[normalizedPath] = session
+                }
+            } else {
+                sessionsByPath[normalizedPath] = session
+            }
+        }
+
+        let sorted = sessionsByPath.values.sorted { s1, s2 in
             // Prioritize: has tool > is active > most recent
-            if s1.activeTool != nil && s2.activeTool == nil { return true }
-            if s2.activeTool != nil && s1.activeTool == nil { return false }
-            if s1.isActive && !s2.isActive { return true }
-            if s2.isActive && !s1.isActive { return false }
-            return s1.lastActivityTime > s2.lastActivityTime
+            Self.shouldPrefer(s1, over: s2)
         }
         return Array(sorted)
+    }
+
+    // Compare two sessions: returns true if s1 should be preferred over s2
+    private static func shouldPrefer(_ s1: SessionState, over s2: SessionState) -> Bool {
+        // Waiting for permission is highest priority
+        if s1.isWaitingForPermission && !s2.isWaitingForPermission { return true }
+        if s2.isWaitingForPermission && !s1.isWaitingForPermission { return false }
+        // Then: has active tool
+        if s1.activeTool != nil && s2.activeTool == nil { return true }
+        if s2.activeTool != nil && s1.activeTool == nil { return false }
+        // Then: is actively thinking
+        if s1.isActive && !s2.isActive { return true }
+        if s2.isActive && !s1.isActive { return false }
+        // Then: most recent activity wins
+        if s1.lastActivityTime != s2.lastActivityTime {
+            return s1.lastActivityTime > s2.lastActivityTime
+        }
+        // Finally: session ID as deterministic tie-breaker
+        return s1.id < s2.id
     }
 
     // Per-screen hover: only fade this screen's pills

@@ -544,6 +544,12 @@ final class NotchState: ObservableObject {
         if payload.event != "Notification" {
             if let session = sessions[sessionId], session.isWaitingForPermission {
                 sessions[sessionId]?.isWaitingForPermission = false
+                // Only set isActive = true if NOT a Stop event (rejection)
+                // Stop event means user rejected or Claude stopped - should go to Idle
+                let isStopEvent = payload.event == "Stop" || payload.event == "SubagentStop"
+                if !isStopEvent {
+                    sessions[sessionId]?.isActive = true
+                }
                 // Only stop alerts if no other sessions are still waiting
                 let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
                 if !stillWaiting {
@@ -765,18 +771,67 @@ final class NotchState: ObservableObject {
         ConfigManager.shared.idleTimeout
     }
 
+    // Stale session removal timeout (30 minutes for unpinned, 7 days for pinned)
+    private let staleSessionTimeout: TimeInterval = 30 * 60
+    private let maxPinnedSessionTimeout: TimeInterval = 7 * 24 * 60 * 60  // 7 days
+
     func clearStaleStates() {
         let now = Date()
+        var sessionsToRemove: [String] = []
+        var pathsToUnpin: [String] = []
 
         for (id, session) in sessions {
             let timeSinceActivity = now.timeIntervalSince(session.lastActivityTime)
 
-            // Only clear stuck tools after timeout (e.g., tool started but never ended)
-            // isActive is controlled exclusively by Stop hook - no timeout override
+            // Clear stuck states after timeout (e.g., tool started but never ended,
+            // or user interrupted and Stop hook never fired)
             if timeSinceActivity > activityTimeout {
                 if sessions[id]?.activeTool != nil {
                     sessions[id]?.activeTool = nil
                 }
+                // Also clear isActive - handles interrupt case where Stop hook doesn't fire
+                if sessions[id]?.isActive == true {
+                    sessions[id]?.isActive = false
+                }
+                // Clear waiting state too - in case notification got stuck
+                if sessions[id]?.isWaitingForPermission == true {
+                    sessions[id]?.isWaitingForPermission = false
+                    // Stop any lingering alerts
+                    let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
+                    if !stillWaiting {
+                        AudioManager.shared.stopWaitingAlerts()
+                    }
+                }
+            }
+
+            let isInactive = !session.isActive && session.activeTool == nil && !session.isWaitingForPermission
+            let isPinned = isProjectPinned(session.projectPath)
+
+            // Remove completely stale sessions based on pinned status:
+            // - Unpinned: 30 minutes
+            // - Pinned: 7 days (prevents indefinite memory growth)
+            let timeout = isPinned ? maxPinnedSessionTimeout : staleSessionTimeout
+            let isStale = timeSinceActivity > timeout
+
+            if isStale && isInactive {
+                sessionsToRemove.append(id)
+                // If pinned and being removed due to max timeout, also unpin the path
+                if isPinned {
+                    pathsToUnpin.append(session.projectPath)
+                }
+            }
+        }
+
+        // Unpin paths for sessions removed due to max timeout
+        for path in pathsToUnpin {
+            unpinProjectPath(path)
+        }
+
+        // Remove stale sessions
+        for id in sessionsToRemove {
+            sessions.removeValue(forKey: id)
+            if activeSessionId == id {
+                activeSessionId = sessions.keys.first
             }
         }
     }
@@ -798,7 +853,7 @@ final class NotchState: ObservableObject {
     // MARK: - Pin/Unpin by Project Path
 
     /// Normalize path by resolving symlinks and standardizing format
-    private func normalizePath(_ path: String) -> String {
+    func normalizePath(_ path: String) -> String {
         let url = URL(fileURLWithPath: path)
         // Resolve symlinks and standardize the path
         if let resolved = try? url.resolvingSymlinksInPath() {

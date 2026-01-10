@@ -130,6 +130,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         menu.addItem(NSMenuItem(title: "Setup...", action: #selector(showSetup), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
+
+        // Version/update status
+        let versionItem = NSMenuItem(title: "Checking for updates...", action: #selector(openReleasesPage), keyEquivalent: "")
+        versionItem.tag = 104
+        menu.addItem(versionItem)
+
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         self.statusItem?.menu = menu
@@ -137,6 +144,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Populate display menu and start status updates
         updateDisplayMenu()
         startStatusUpdates()
+        setupUpdateChecker()
+    }
+
+    private func setupUpdateChecker() {
+        // Subscribe to update status changes
+        UpdateChecker.shared.$status
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.updateVersionMenuItem(status)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func updateVersionMenuItem(_ status: UpdateStatus) {
+        guard let menu = statusItem?.menu,
+              let versionItem = menu.item(withTag: 104) else { return }
+
+        versionItem.title = status.menuTitle
+
+        // Make clickable based on status
+        if status.hasUpdate {
+            versionItem.action = #selector(performUpdate)
+            versionItem.target = self
+        } else if status.canRestart {
+            versionItem.action = #selector(restartAfterUpdate)
+            versionItem.target = self
+        } else {
+            versionItem.action = nil
+            versionItem.target = nil
+        }
     }
 
     private func startStatusUpdates() {
@@ -406,6 +443,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc func clearAllPinned() {
         NotchState.shared.pinnedProjectPaths.removeAll()
+    }
+
+    @objc func openReleasesPage() {
+        if let url = UpdateChecker.shared.releaseURL {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc func performUpdate() {
+        UpdateChecker.shared.performBrewUpgrade()
+    }
+
+    @objc func restartAfterUpdate() {
+        UpdateChecker.shared.restartApp()
     }
 
     // MARK: - Display Selection
