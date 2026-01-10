@@ -99,7 +99,7 @@ class UpdateChecker: ObservableObject {
 
         var request = URLRequest(url: url)
         request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 10
+        request.timeoutInterval = 30
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -193,15 +193,16 @@ class UpdateChecker: ObservableObject {
 
         status = .updating
 
+        // Capture brewPath before detached task to avoid MainActor context switch
+        let brewExecutable = brewPath
+
         Task.detached { [weak self] in
             guard let self = self else { return }
-
-            let brewPath = await self.brewPath
 
             // Run brew update first, then upgrade
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = ["-c", "\(brewPath) update && \(brewPath) upgrade cookinn-notch"]
+            process.arguments = ["-c", "\(brewExecutable) update && \(brewExecutable) upgrade cookinn-notch"]
 
             let pipe = Pipe()
             process.standardOutput = pipe
@@ -209,17 +210,18 @@ class UpdateChecker: ObservableObject {
 
             do {
                 try process.run()
-                process.waitUntilExit()
 
+                // Read output while process is running (before waitUntilExit)
+                let outputData = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: outputData, encoding: .utf8) ?? ""
+
+                process.waitUntilExit()
                 let exitCode = process.terminationStatus
 
                 await MainActor.run {
                     if exitCode == 0 {
                         self.status = .updateComplete
                     } else {
-                        // Read error output
-                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                        let output = String(data: data, encoding: .utf8) ?? "Unknown error"
                         print("[UpdateChecker] Brew upgrade failed: \(output)")
                         self.status = .error("Upgrade failed")
                     }
@@ -234,9 +236,15 @@ class UpdateChecker: ObservableObject {
 
     /// Restart the app after update
     func restartApp() {
+        let bundlePath = Bundle.main.bundlePath
+
+        // Use Process with proper argument escaping to avoid shell injection
+        // The bundle path is escaped by replacing quotes and using double quotes
+        let escapedPath = bundlePath.replacingOccurrences(of: "\"", with: "\\\"")
+
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1 && open -n '\(Bundle.main.bundlePath)'"]
+        task.arguments = ["-c", "sleep 1 && open -n \"\(escapedPath)\""]
 
         do {
             try task.run()

@@ -800,10 +800,12 @@ final class NotchState: ObservableObject {
             }
 
             // Remove completely stale sessions (idle for 30+ minutes)
-            // Only remove if: not active, no tool running, not waiting, and stale
+            // Only remove if: not active, no tool running, not waiting, stale, AND path not pinned
+            // Keeping pinned sessions avoids orphaned pin state in UserDefaults
             let isStale = timeSinceActivity > staleSessionTimeout
             let isInactive = !session.isActive && session.activeTool == nil && !session.isWaitingForPermission
-            if isStale && isInactive {
+            let isNotPinned = !isProjectPinned(session.projectPath)
+            if isStale && isInactive && isNotPinned {
                 sessionsToRemove.append(id)
             }
         }
@@ -834,7 +836,7 @@ final class NotchState: ObservableObject {
     // MARK: - Pin/Unpin by Project Path
 
     /// Normalize path by resolving symlinks and standardizing format
-    private func normalizePath(_ path: String) -> String {
+    func normalizePath(_ path: String) -> String {
         let url = URL(fileURLWithPath: path)
         // Resolve symlinks and standardize the path
         if let resolved = try? url.resolvingSymlinksInPath() {

@@ -19,18 +19,19 @@ struct NotchView: View {
         // Only show sessions from pinned project paths
         let pinnedSessions = state.sessions.values.filter { state.isProjectPinned($0.projectPath) }
 
-        // Deduplicate by projectPath - keep only the most active/recent session per path
+        // Deduplicate by normalized projectPath - keep only the most active/recent session per path
+        // Using normalized paths ensures symlinks and different path representations are treated as same
         var sessionsByPath: [String: SessionState] = [:]
         for session in pinnedSessions {
-            let path = session.projectPath
-            if let existing = sessionsByPath[path] {
+            let normalizedPath = state.normalizePath(session.projectPath)
+            if let existing = sessionsByPath[normalizedPath] {
                 // Keep the more active/recent session
                 let keepNew = Self.shouldPrefer(session, over: existing)
                 if keepNew {
-                    sessionsByPath[path] = session
+                    sessionsByPath[normalizedPath] = session
                 }
             } else {
-                sessionsByPath[path] = session
+                sessionsByPath[normalizedPath] = session
             }
         }
 
