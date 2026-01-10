@@ -26,6 +26,8 @@ PERMISSION_MODE=$(echo "$INPUT" | jq -r '.permission_mode // "default"' 2>/dev/n
 SOURCE=$(echo "$INPUT" | jq -r '.source // ""' 2>/dev/null || echo "")
 REASON=$(echo "$INPUT" | jq -r '.reason // ""' 2>/dev/null || echo "")
 MESSAGE=$(echo "$INPUT" | jq -r '.message // ""' 2>/dev/null || echo "")
+# Notification hook fields
+NOTIFICATION_TYPE=$(echo "$INPUT" | jq -r '.notification_type // ""' 2>/dev/null || echo "")
 
 # Token usage (from Stop events - usually null, we get real data from transcript)
 USAGE=$(echo "$INPUT" | jq -c 'if .usage then .usage else null end' 2>/dev/null || echo 'null')
@@ -81,6 +83,7 @@ PAYLOAD=$(cat <<EOF
   "source": "$SOURCE",
   "reason": "$REASON",
   "message": "$MESSAGE",
+  "notificationType": "$NOTIFICATION_TYPE",
   "usage": $USAGE,
   "contextTokens": ${CONTEXT_TOKENS:-null},
   "contextPercent": ${CONTEXT_PERCENT:-null},

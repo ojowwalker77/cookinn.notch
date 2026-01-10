@@ -38,7 +38,8 @@ HOOKS_CONFIG=$(cat <<EOF
     "Stop": [{ "hooks": [{ "type": "command", "command": "$HOOK_SCRIPT" }] }],
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "$HOOK_SCRIPT" }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "$HOOK_SCRIPT" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "$HOOK_SCRIPT" }] }]
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "$HOOK_SCRIPT" }] }],
+    "Notification": [{ "matcher": "permission_prompt", "hooks": [{ "type": "command", "command": "$HOOK_SCRIPT" }] }]
   }
 }
 EOF

@@ -67,12 +67,24 @@ struct SessionCard: View {
     @State private var verbTimerCancellable: AnyCancellable?
     @State private var colorTimerCancellable: AnyCancellable?
 
+    // Fast pulse animation for waiting state
+    @State private var waitingPulseScale: CGFloat = 1.0
+    @State private var waitingPulseOpacity: Double = 1.0
+    @State private var pulseTimerCancellable: AnyCancellable?
+
     private var isThinking: Bool {
         guard let session = session else { return false }
-        return session.isActive && session.activeTool == nil
+        return session.isActive && session.activeTool == nil && !session.isWaitingForPermission
+    }
+
+    private var isWaitingForPermission: Bool {
+        session?.isWaitingForPermission ?? false
     }
 
     private var activeColor: Color {
+        if isWaitingForPermission {
+            return .red  // Urgent attention - waiting for user
+        }
         if let tool = session?.activeTool {
             return tool.color
         }
@@ -105,11 +117,17 @@ struct SessionCard: View {
                     .frame(width: 28, alignment: .trailing)
             }
 
-            ActivityIndicator(
-                session: session,
-                tool: session?.activeTool
-            )
-            .frame(width: 20, height: 14)
+            // Show pulsing dot when waiting, otherwise show activity indicator
+            if isWaitingForPermission {
+                WaitingPulseIndicator(color: activeColor)
+                    .frame(width: 20, height: 14)
+            } else {
+                ActivityIndicator(
+                    session: session,
+                    tool: session?.activeTool
+                )
+                .frame(width: 20, height: 14)
+            }
 
             // Subtle divider
             Rectangle()
@@ -132,6 +150,9 @@ struct SessionCard: View {
         .overlay(
             ContextBorder(percent: contextPercent, cornerRadius: cornerRadius, color: activeColor)
         )
+        // Fast pulse animation on the whole pill when waiting for permission
+        .scaleEffect(isWaitingForPermission ? waitingPulseScale : 1.0)
+        .opacity(isWaitingForPermission ? waitingPulseOpacity : 1.0)
         .frame(maxWidth: .infinity, alignment: .trailing)
         .onChange(of: session?.isActive) { _, isActive in
             // Reset verb when thinking starts
@@ -144,15 +165,56 @@ struct SessionCard: View {
         .onChange(of: session?.activeTool?.id) { _, _ in
             updateTimers()
         }
+        .onChange(of: session?.isWaitingForPermission) { _, isWaiting in
+            if isWaiting == true {
+                startPulseAnimation()
+            } else {
+                stopPulseAnimation()
+            }
+        }
         .onAppear {
             // Initialize with a fun verb
             if isThinking {
                 currentFunVerb = ConfigManager.shared.randomFunVerb(for: "thinking") ?? "Thinking"
             }
             startTimers()
+            if isWaitingForPermission {
+                startPulseAnimation()
+            }
         }
         .onDisappear {
             stopTimers()
+            stopPulseAnimation()
+        }
+    }
+
+    // MARK: - Pulse Animation
+
+    private func startPulseAnimation() {
+        guard pulseTimerCancellable == nil else { return }
+        // Fast pulse: 200ms cycle
+        pulseTimerCancellable = Timer.publish(every: 0.2, on: .main, in: .common)
+            .autoconnect()
+            .sink { _ in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    // Alternate between normal and scaled/dimmed
+                    if waitingPulseScale > 1.0 {
+                        waitingPulseScale = 1.0
+                        waitingPulseOpacity = 1.0
+                    } else {
+                        waitingPulseScale = 1.03
+                        waitingPulseOpacity = 0.85
+                    }
+                }
+            }
+    }
+
+    private func stopPulseAnimation() {
+        pulseTimerCancellable?.cancel()
+        pulseTimerCancellable = nil
+        withAnimation(.easeOut(duration: 0.15)) {
+            waitingPulseScale = 1.0
+            waitingPulseOpacity = 1.0
         }
     }
 
@@ -225,6 +287,10 @@ struct SessionCard: View {
     private var currentVerb: String {
         guard let session = session else { return "Idle" }
 
+        if session.isWaitingForPermission {
+            return "Waiting"
+        }
+
         if let tool = session.activeTool {
             return tool.displayName
         }
@@ -237,6 +303,11 @@ struct SessionCard: View {
     }
 
     private var verbColor: Color {
+        // Waiting state gets full red attention
+        if session?.isWaitingForPermission == true {
+            return activeColor  // Red for waiting
+        }
+
         guard session?.isActive == true || session?.activeTool != nil else {
             return .gray
         }
@@ -547,6 +618,43 @@ struct PillBorderPath: Shape {
         )
 
         return path
+    }
+}
+
+// MARK: - Waiting Pulse Indicator (replaces cube when waiting for permission)
+
+struct WaitingPulseIndicator: View {
+    let color: Color
+
+    @State private var pulsePhase: Double = 0.0
+    @State private var timerCancellable: AnyCancellable?
+
+    var body: some View {
+        // Simple pulsing circle that fills the 3x2 grid space
+        Circle()
+            .fill(color)
+            .scaleEffect(0.6 + pulsePhase * 0.4)  // Scale between 0.6 and 1.0
+            .opacity(0.5 + pulsePhase * 0.5)      // Opacity between 0.5 and 1.0
+            .onAppear {
+                startPulse()
+            }
+            .onDisappear {
+                timerCancellable?.cancel()
+                timerCancellable = nil
+            }
+    }
+
+    private func startPulse() {
+        guard timerCancellable == nil else { return }
+        // Fast pulse: 150ms cycle for urgency
+        timerCancellable = Timer.publish(every: 0.15, on: .main, in: .common)
+            .autoconnect()
+            .sink { _ in
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    // Alternate between 0 and 1
+                    pulsePhase = pulsePhase > 0.5 ? 0.0 : 1.0
+                }
+            }
     }
 }
 
