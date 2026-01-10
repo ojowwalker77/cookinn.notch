@@ -274,7 +274,7 @@ class UpdateChecker: ObservableObject {
 
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = ["-c", "\(brewExecutable) update && \(brewExecutable) upgrade cookinn-notch"]
+            process.arguments = ["-c", "\"$1\" update && \"$1\" upgrade cookinn-notch", "--", brewExecutable]
 
             let pipe = Pipe()
             process.standardOutput = pipe
