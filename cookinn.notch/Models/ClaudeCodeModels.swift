@@ -544,9 +544,12 @@ final class NotchState: ObservableObject {
         if payload.event != "Notification" {
             if let session = sessions[sessionId], session.isWaitingForPermission {
                 sessions[sessionId]?.isWaitingForPermission = false
-                // Set isActive = true so we don't briefly show "Idle" before the next state
-                // The actual state (tool, thinking, etc.) will be set by the event handler
-                sessions[sessionId]?.isActive = true
+                // Only set isActive = true if NOT a Stop event (rejection)
+                // Stop event means user rejected or Claude stopped - should go to Idle
+                let isStopEvent = payload.event == "Stop" || payload.event == "SubagentStop"
+                if !isStopEvent {
+                    sessions[sessionId]?.isActive = true
+                }
                 // Only stop alerts if no other sessions are still waiting
                 let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
                 if !stillWaiting {
@@ -768,12 +771,14 @@ final class NotchState: ObservableObject {
         ConfigManager.shared.idleTimeout
     }
 
-    // Stale session removal timeout (30 minutes)
+    // Stale session removal timeout (30 minutes for unpinned, 7 days for pinned)
     private let staleSessionTimeout: TimeInterval = 30 * 60
+    private let maxPinnedSessionTimeout: TimeInterval = 7 * 24 * 60 * 60  // 7 days
 
     func clearStaleStates() {
         let now = Date()
         var sessionsToRemove: [String] = []
+        var pathsToUnpin: [String] = []
 
         for (id, session) in sessions {
             let timeSinceActivity = now.timeIntervalSince(session.lastActivityTime)
@@ -799,15 +804,27 @@ final class NotchState: ObservableObject {
                 }
             }
 
-            // Remove completely stale sessions (idle for 30+ minutes)
-            // Only remove if: not active, no tool running, not waiting, stale, AND path not pinned
-            // Keeping pinned sessions avoids orphaned pin state in UserDefaults
-            let isStale = timeSinceActivity > staleSessionTimeout
             let isInactive = !session.isActive && session.activeTool == nil && !session.isWaitingForPermission
-            let isNotPinned = !isProjectPinned(session.projectPath)
-            if isStale && isInactive && isNotPinned {
+            let isPinned = isProjectPinned(session.projectPath)
+
+            // Remove completely stale sessions based on pinned status:
+            // - Unpinned: 30 minutes
+            // - Pinned: 7 days (prevents indefinite memory growth)
+            let timeout = isPinned ? maxPinnedSessionTimeout : staleSessionTimeout
+            let isStale = timeSinceActivity > timeout
+
+            if isStale && isInactive {
                 sessionsToRemove.append(id)
+                // If pinned and being removed due to max timeout, also unpin the path
+                if isPinned {
+                    pathsToUnpin.append(session.projectPath)
+                }
             }
+        }
+
+        // Unpin paths for sessions removed due to max timeout
+        for path in pathsToUnpin {
+            unpinProjectPath(path)
         }
 
         // Remove stale sessions

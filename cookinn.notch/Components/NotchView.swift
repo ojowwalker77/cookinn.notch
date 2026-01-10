@@ -53,8 +53,12 @@ struct NotchView: View {
         // Then: is actively thinking
         if s1.isActive && !s2.isActive { return true }
         if s2.isActive && !s1.isActive { return false }
-        // Finally: most recent activity wins
-        return s1.lastActivityTime > s2.lastActivityTime
+        // Then: most recent activity wins
+        if s1.lastActivityTime != s2.lastActivityTime {
+            return s1.lastActivityTime > s2.lastActivityTime
+        }
+        // Finally: session ID as deterministic tie-breaker
+        return s1.id < s2.id
     }
 
     // Per-screen hover: only fade this screen's pills

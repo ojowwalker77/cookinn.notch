@@ -55,6 +55,8 @@ class UpdateChecker: ObservableObject {
     private let repoName = "cookinn.notch"
     private var checkTask: Task<Void, Never>?
     private var periodicCheckTimer: Timer?
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
 
     // Check every 24 hours
     private let checkInterval: TimeInterval = 24 * 60 * 60
@@ -69,6 +71,43 @@ class UpdateChecker: ObservableObject {
         checkForUpdates()
         // Start periodic checks
         startPeriodicChecks()
+        // Setup sleep/wake observers
+        setupLifecycleObservers()
+    }
+
+    deinit {
+        periodicCheckTimer?.invalidate()
+        if let observer = sleepObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        if let observer = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+    }
+
+    private func setupLifecycleObservers() {
+        // Pause timer on sleep
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.periodicCheckTimer?.invalidate()
+            self?.periodicCheckTimer = nil
+        }
+
+        // Resume timer on wake
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.startPeriodicChecks()
+                // Also check for updates after wake
+                self?.checkForUpdates()
+            }
+        }
     }
 
     private func startPeriodicChecks() {
@@ -143,21 +182,52 @@ class UpdateChecker: ObservableObject {
         }
     }
 
-    /// Compare semantic versions: returns true if version1 > version2
+    /// Compare semantic versions with pre-release support
+    /// Returns true if version1 > version2
+    /// Handles: "1.6.0" > "1.6.0-beta" > "1.6.0-alpha"
     private func isNewerVersion(_ version1: String, than version2: String) -> Bool {
-        let v1Parts = version1.split(separator: ".").compactMap { Int($0) }
-        let v2Parts = version2.split(separator: ".").compactMap { Int($0) }
+        let (v1Base, v1Pre) = parseVersion(version1)
+        let (v2Base, v2Pre) = parseVersion(version2)
 
-        // Pad to same length
-        let maxLen = max(v1Parts.count, v2Parts.count)
-        let v1 = v1Parts + Array(repeating: 0, count: maxLen - v1Parts.count)
-        let v2 = v2Parts + Array(repeating: 0, count: maxLen - v2Parts.count)
+        // Compare base versions first
+        let baseComparison = compareBaseVersions(v1Base, v2Base)
+        if baseComparison != 0 {
+            return baseComparison > 0
+        }
+
+        // Base versions equal - compare pre-release
+        // No pre-release > any pre-release (e.g., "1.6.0" > "1.6.0-beta")
+        if v1Pre == nil && v2Pre != nil { return true }
+        if v1Pre != nil && v2Pre == nil { return false }
+        if v1Pre == nil && v2Pre == nil { return false }
+
+        // Both have pre-release - compare lexicographically
+        return v1Pre! > v2Pre!
+    }
+
+    /// Parse version into base and pre-release components
+    /// "1.6.0-beta.1" -> ([1,6,0], "beta.1")
+    private func parseVersion(_ version: String) -> (base: [Int], preRelease: String?) {
+        let parts = version.split(separator: "-", maxSplits: 1)
+        let basePart = String(parts[0])
+        let preRelease = parts.count > 1 ? String(parts[1]) : nil
+
+        let baseNumbers = basePart.split(separator: ".").compactMap { Int($0) }
+        return (baseNumbers, preRelease)
+    }
+
+    /// Compare base version arrays
+    /// Returns: positive if v1 > v2, negative if v1 < v2, 0 if equal
+    private func compareBaseVersions(_ v1: [Int], _ v2: [Int]) -> Int {
+        let maxLen = max(v1.count, v2.count)
+        let v1Padded = v1 + Array(repeating: 0, count: maxLen - v1.count)
+        let v2Padded = v2 + Array(repeating: 0, count: maxLen - v2.count)
 
         for i in 0..<maxLen {
-            if v1[i] > v2[i] { return true }
-            if v1[i] < v2[i] { return false }
+            if v1Padded[i] > v2Padded[i] { return 1 }
+            if v1Padded[i] < v2Padded[i] { return -1 }
         }
-        return false
+        return 0
     }
 
     /// URL to download the latest release
@@ -183,6 +253,9 @@ class UpdateChecker: ObservableObject {
 
     /// Run brew upgrade to update the app
     func performBrewUpgrade() {
+        // Validate state before proceeding
+        guard case .updateAvailable = status else { return }
+
         guard hasHomebrew else {
             // Fallback to opening releases page
             if let url = releaseURL {
@@ -199,7 +272,6 @@ class UpdateChecker: ObservableObject {
         Task.detached { [weak self] in
             guard let self = self else { return }
 
-            // Run brew update first, then upgrade
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
             process.arguments = ["-c", "\(brewExecutable) update && \(brewExecutable) upgrade cookinn-notch"]
@@ -208,15 +280,30 @@ class UpdateChecker: ObservableObject {
             process.standardOutput = pipe
             process.standardError = pipe
 
+            // Collect output asynchronously to prevent deadlock
+            var outputData = Data()
+            let outputLock = NSLock()
+
+            pipe.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                if !data.isEmpty {
+                    outputLock.lock()
+                    outputData.append(data)
+                    outputLock.unlock()
+                }
+            }
+
             do {
                 try process.run()
-
-                // Read output while process is running (before waitUntilExit)
-                let outputData = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: outputData, encoding: .utf8) ?? ""
-
                 process.waitUntilExit()
+
+                // Stop reading
+                pipe.fileHandleForReading.readabilityHandler = nil
+
                 let exitCode = process.terminationStatus
+                outputLock.lock()
+                let output = String(data: outputData, encoding: .utf8) ?? ""
+                outputLock.unlock()
 
                 await MainActor.run {
                     if exitCode == 0 {
@@ -227,6 +314,7 @@ class UpdateChecker: ObservableObject {
                     }
                 }
             } catch {
+                pipe.fileHandleForReading.readabilityHandler = nil
                 await MainActor.run {
                     self.status = .error(error.localizedDescription)
                 }
@@ -236,15 +324,16 @@ class UpdateChecker: ObservableObject {
 
     /// Restart the app after update
     func restartApp() {
+        // Validate state before proceeding
+        guard case .updateComplete = status else { return }
+
         let bundlePath = Bundle.main.bundlePath
 
-        // Use Process with proper argument escaping to avoid shell injection
-        // The bundle path is escaped by replacing quotes and using double quotes
-        let escapedPath = bundlePath.replacingOccurrences(of: "\"", with: "\\\"")
-
+        // Use positional parameter $1 to avoid shell injection
+        // The bundle path is passed as a separate argument, not interpolated into the command
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1 && open -n \"\(escapedPath)\""]
+        task.arguments = ["-c", "sleep 1 && open -n \"$1\"", "--", bundlePath]
 
         do {
             try task.run()
