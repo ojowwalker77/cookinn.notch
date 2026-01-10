@@ -45,6 +45,9 @@ Sessions automatically appear in notch when started. No setup needed.
 - Project name
 - Context window usage
 - Activity patterns
+- **Alert mode**: Pulses red when Claude needs your permission/input, with optional sound alerts
+
+> Fun fact: The alert sound was designed and crafted by hand by the author (@ojowwalker77).
 
 ## Documentation
 

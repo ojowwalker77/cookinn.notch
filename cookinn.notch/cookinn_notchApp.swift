@@ -117,6 +117,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         openAtLoginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(openAtLoginItem)
 
+        let alertSoundsItem = NSMenuItem(title: "Alert Sounds", action: #selector(toggleAlertSounds), keyEquivalent: "")
+        alertSoundsItem.tag = 103
+        alertSoundsItem.state = NotchState.shared.alertSoundsEnabled ? .on : .off
+        menu.addItem(alertSoundsItem)
+
         menu.addItem(NSMenuItem.separator())
 
         let statusMenuItem = NSMenuItem(title: "Status: Starting...", action: nil, keyEquivalent: "")
@@ -485,6 +490,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let menu = statusItem?.menu,
            let item = menu.item(withTag: 102) {
             item.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        }
+    }
+
+    @objc func toggleAlertSounds() {
+        NotchState.shared.alertSoundsEnabled.toggle()
+
+        // Update menu item checkmark
+        if let menu = statusItem?.menu,
+           let item = menu.item(withTag: 103) {
+            item.state = NotchState.shared.alertSoundsEnabled ? .on : .off
         }
     }
 

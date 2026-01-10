@@ -2,6 +2,16 @@
 
 All notable changes to cookinn.notch will be documented in this file.
 
+## [1.5] - 2025-01-09
+
+### Added
+- **Alert mode**: Pill pulses red and shows "Waiting" when Claude needs user permission/input
+- **Alert sounds**: Custom notification sound plays when waiting for input, with escalating reminders at 10s, 30s, and 60s
+- Alert sounds toggle in menu bar (enabled by default)
+- Graceful delay before entering alert mode (inherent to hook event timing)
+
+> Fun fact: The alert sound was designed and crafted by hand by the author (@ojowwalker77).
+
 ## [1.4] - 2025-01-09
 
 ### Changed

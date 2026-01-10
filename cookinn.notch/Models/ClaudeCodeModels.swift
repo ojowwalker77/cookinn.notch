@@ -276,6 +276,7 @@ struct SessionState: Identifiable, Equatable {
     var activeTool: ActiveTool?
     var recentTools: [ActiveTool] = []
     var isActive: Bool = false  // Only true when Claude is actively responding
+    var isWaitingForPermission: Bool = false  // True when Claude needs user permission (e.g., Bash)
 
     // Token tracking
     var totalInputTokens: Int = 0
@@ -292,6 +293,9 @@ struct SessionState: Identifiable, Equatable {
     }
 
     var statusText: String {
+        if isWaitingForPermission {
+            return "Waiting"
+        }
         if let tool = activeTool {
             return tool.displayName
         }
@@ -318,6 +322,7 @@ struct SessionState: Identifiable, Equatable {
         lhs.id == rhs.id &&
         lhs.activeTool == rhs.activeTool &&
         lhs.isActive == rhs.isActive &&
+        lhs.isWaitingForPermission == rhs.isWaitingForPermission &&
         lhs.lastActivityTime == rhs.lastActivityTime &&
         lhs.contextPercent == rhs.contextPercent
     }
@@ -393,6 +398,7 @@ final class NotchState: ObservableObject {
     private static let pinnedPathsKey = "NotchPinnedProjectPaths"
     private static let showOnAllMonitorsKey = "NotchShowOnAllMonitors"
     private static let selectedDisplayIDKey = "NotchSelectedDisplayID"
+    private static let alertSoundsEnabledKey = "NotchAlertSoundsEnabled"
     private var isLoadingSettings = false
 
     // Settings
@@ -400,6 +406,13 @@ final class NotchState: ObservableObject {
         didSet {
             guard !isLoadingSettings else { return }
             UserDefaults.standard.set(showOnAllMonitors, forKey: Self.showOnAllMonitorsKey)
+        }
+    }
+
+    @Published var alertSoundsEnabled: Bool = true {
+        didSet {
+            guard !isLoadingSettings else { return }
+            UserDefaults.standard.set(alertSoundsEnabled, forKey: Self.alertSoundsEnabledKey)
         }
     }
 
@@ -495,6 +508,13 @@ final class NotchState: ObservableObject {
             selectedDisplayID = UInt32(savedID)
         }
 
+        // Load alert sounds setting (default to true if not set)
+        if UserDefaults.standard.object(forKey: Self.alertSoundsEnabledKey) != nil {
+            alertSoundsEnabled = UserDefaults.standard.bool(forKey: Self.alertSoundsEnabledKey)
+        } else {
+            alertSoundsEnabled = true  // Default enabled
+        }
+
         isLoadingSettings = false
     }
 
@@ -516,6 +536,19 @@ final class NotchState: ObservableObject {
                 session.contextPercent = pct
                 session.contextTokens = payload.contextTokens ?? 0
                 sessions[sessionId] = session
+            }
+        }
+
+        // Clear waiting state on ANY event except Notification (which sets it)
+        // This ensures immediate dismissal when user responds/rejects
+        if payload.event != "Notification" {
+            if let session = sessions[sessionId], session.isWaitingForPermission {
+                sessions[sessionId]?.isWaitingForPermission = false
+                // Only stop alerts if no other sessions are still waiting
+                let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
+                if !stillWaiting {
+                    AudioManager.shared.stopWaitingAlerts()
+                }
             }
         }
 
@@ -551,6 +584,9 @@ final class NotchState: ObservableObject {
 
         guard let toolName = payload.toolName, !toolName.isEmpty else { return }
 
+        // Check if we were waiting (to stop alerts)
+        let wasWaiting = sessions[sessionId]?.isWaitingForPermission ?? false
+
         let tool = ActiveTool(
             id: payload.toolUseId ?? UUID().uuidString,
             name: toolName,
@@ -560,8 +596,17 @@ final class NotchState: ObservableObject {
 
         sessions[sessionId]?.activeTool = tool
         sessions[sessionId]?.isActive = true  // Claude is actively working
+        sessions[sessionId]?.isWaitingForPermission = false  // Tool started, permission granted
         sessions[sessionId]?.lastActivityTime = now
         activeSessionId = sessionId
+
+        // Stop alerts only if no other sessions are still waiting
+        if wasWaiting {
+            let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
+            if !stillWaiting {
+                AudioManager.shared.stopWaitingAlerts()
+            }
+        }
 
         // Mark as active
         lastActivityTime = now
@@ -597,8 +642,11 @@ final class NotchState: ObservableObject {
     private func handleStop(_ payload: HookPayload, sessionId: String, now: Date) {
         // Agent finished responding - this is THE signal to go idle
         if var session = sessions[sessionId] {
+            let wasWaiting = session.isWaitingForPermission
+
             session.activeTool = nil
             session.isActive = false  // Stop hook = idle, no other scenario
+            session.isWaitingForPermission = false  // Clear waiting on stop (user rejected or responded)
             session.lastActivityTime = now
 
             // Accumulate token usage
@@ -610,6 +658,14 @@ final class NotchState: ObservableObject {
             }
 
             sessions[sessionId] = session
+
+            // Stop alerts only if no other sessions are still waiting
+            if wasWaiting {
+                let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
+                if !stillWaiting {
+                    AudioManager.shared.stopWaitingAlerts()
+                }
+            }
         }
 
         // Update global activity time to reset idle timer
@@ -640,7 +696,25 @@ final class NotchState: ObservableObject {
     }
 
     private func handleNotification(_ payload: HookPayload, sessionId: String) {
-        // Could display notifications in the notch UI - currently a no-op
+        // Check for permission prompt notifications (strict matching to avoid false positives)
+        let notifType = payload.notificationType?.lowercased() ?? ""
+        let isPermissionPrompt = notifType == "permission_prompt" ||
+                                 notifType == "permission_required"
+
+        if isPermissionPrompt {
+            if var session = sessions[sessionId] {
+                // Only trigger if not already waiting (prevent repeated sounds)
+                let wasWaiting = session.isWaitingForPermission
+                session.isWaitingForPermission = true
+                session.isActive = false  // Claude is blocked waiting
+                sessions[sessionId] = session
+
+                // Start escalating alerts only on transition to waiting
+                if !wasWaiting {
+                    AudioManager.shared.startWaitingAlerts()
+                }
+            }
+        }
     }
 
     private func handleUserPrompt(_ payload: HookPayload, sessionId: String, now: Date) {
@@ -648,9 +722,19 @@ final class NotchState: ObservableObject {
 
         // Mark session as active when user submits a prompt
         if var session = sessions[sessionId] {
+            let wasWaiting = session.isWaitingForPermission
             session.isActive = true
+            session.isWaitingForPermission = false  // User responded, clear waiting state
             session.lastActivityTime = now
             sessions[sessionId] = session
+
+            // Stop alerts only if no other sessions are still waiting
+            if wasWaiting {
+                let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
+                if !stillWaiting {
+                    AudioManager.shared.stopWaitingAlerts()
+                }
+            }
         }
         activeSessionId = sessionId
 
