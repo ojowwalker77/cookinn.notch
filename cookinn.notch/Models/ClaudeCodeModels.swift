@@ -544,7 +544,11 @@ final class NotchState: ObservableObject {
         if payload.event != "Notification" {
             if let session = sessions[sessionId], session.isWaitingForPermission {
                 sessions[sessionId]?.isWaitingForPermission = false
-                AudioManager.shared.stopWaitingAlerts()
+                // Only stop alerts if no other sessions are still waiting
+                let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
+                if !stillWaiting {
+                    AudioManager.shared.stopWaitingAlerts()
+                }
             }
         }
 
@@ -596,9 +600,12 @@ final class NotchState: ObservableObject {
         sessions[sessionId]?.lastActivityTime = now
         activeSessionId = sessionId
 
-        // Stop alerts immediately when tool starts (permission was granted)
+        // Stop alerts only if no other sessions are still waiting
         if wasWaiting {
-            AudioManager.shared.stopWaitingAlerts()
+            let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
+            if !stillWaiting {
+                AudioManager.shared.stopWaitingAlerts()
+            }
         }
 
         // Mark as active
@@ -652,9 +659,12 @@ final class NotchState: ObservableObject {
 
             sessions[sessionId] = session
 
-            // Stop alerts when session stops (user rejected or conversation ended)
+            // Stop alerts only if no other sessions are still waiting
             if wasWaiting {
-                AudioManager.shared.stopWaitingAlerts()
+                let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
+                if !stillWaiting {
+                    AudioManager.shared.stopWaitingAlerts()
+                }
             }
         }
 
@@ -686,11 +696,10 @@ final class NotchState: ObservableObject {
     }
 
     private func handleNotification(_ payload: HookPayload, sessionId: String) {
-        // Check for permission prompt notifications
+        // Check for permission prompt notifications (strict matching to avoid false positives)
         let notifType = payload.notificationType?.lowercased() ?? ""
         let isPermissionPrompt = notifType == "permission_prompt" ||
-                                 notifType.contains("permission") ||
-                                 payload.message?.lowercased().contains("permission") == true
+                                 notifType == "permission_required"
 
         if isPermissionPrompt {
             if var session = sessions[sessionId] {
@@ -719,9 +728,12 @@ final class NotchState: ObservableObject {
             session.lastActivityTime = now
             sessions[sessionId] = session
 
-            // Stop alerts immediately when user responds
+            // Stop alerts only if no other sessions are still waiting
             if wasWaiting {
-                AudioManager.shared.stopWaitingAlerts()
+                let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
+                if !stillWaiting {
+                    AudioManager.shared.stopWaitingAlerts()
+                }
             }
         }
         activeSessionId = sessionId

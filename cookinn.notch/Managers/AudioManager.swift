@@ -31,7 +31,8 @@ final class AudioManager {
         // Schedule escalating reminders
         let delays: [TimeInterval] = [10, 30, 60]  // seconds from now
         for delay in delays {
-            let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] timer in
+                defer { self?.reminderTimers.removeAll { $0 === timer } }
                 guard self?.isWaitingActive == true else { return }
                 self?.playAlertSoundIfEnabled()
             }
@@ -61,6 +62,9 @@ final class AudioManager {
 
     /// Play the alert sound once
     private func playAlertSound() {
+        // Stop any currently playing sound to avoid overlap
+        audioPlayer?.stop()
+
         // Find the alert.mp3 in the bundle
         guard let soundURL = Bundle.main.url(forResource: "alert", withExtension: "mp3") else {
             print("[AudioManager] alert.mp3 not found in bundle")
