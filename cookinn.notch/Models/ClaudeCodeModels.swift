@@ -544,6 +544,9 @@ final class NotchState: ObservableObject {
         if payload.event != "Notification" {
             if let session = sessions[sessionId], session.isWaitingForPermission {
                 sessions[sessionId]?.isWaitingForPermission = false
+                // Set isActive = true so we don't briefly show "Idle" before the next state
+                // The actual state (tool, thinking, etc.) will be set by the event handler
+                sessions[sessionId]?.isActive = true
                 // Only stop alerts if no other sessions are still waiting
                 let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
                 if !stillWaiting {
@@ -765,18 +768,51 @@ final class NotchState: ObservableObject {
         ConfigManager.shared.idleTimeout
     }
 
+    // Stale session removal timeout (30 minutes)
+    private let staleSessionTimeout: TimeInterval = 30 * 60
+
     func clearStaleStates() {
         let now = Date()
+        var sessionsToRemove: [String] = []
 
         for (id, session) in sessions {
             let timeSinceActivity = now.timeIntervalSince(session.lastActivityTime)
 
-            // Only clear stuck tools after timeout (e.g., tool started but never ended)
-            // isActive is controlled exclusively by Stop hook - no timeout override
+            // Clear stuck states after timeout (e.g., tool started but never ended,
+            // or user interrupted and Stop hook never fired)
             if timeSinceActivity > activityTimeout {
                 if sessions[id]?.activeTool != nil {
                     sessions[id]?.activeTool = nil
                 }
+                // Also clear isActive - handles interrupt case where Stop hook doesn't fire
+                if sessions[id]?.isActive == true {
+                    sessions[id]?.isActive = false
+                }
+                // Clear waiting state too - in case notification got stuck
+                if sessions[id]?.isWaitingForPermission == true {
+                    sessions[id]?.isWaitingForPermission = false
+                    // Stop any lingering alerts
+                    let stillWaiting = sessions.values.contains { $0.isWaitingForPermission }
+                    if !stillWaiting {
+                        AudioManager.shared.stopWaitingAlerts()
+                    }
+                }
+            }
+
+            // Remove completely stale sessions (idle for 30+ minutes)
+            // Only remove if: not active, no tool running, not waiting, and stale
+            let isStale = timeSinceActivity > staleSessionTimeout
+            let isInactive = !session.isActive && session.activeTool == nil && !session.isWaitingForPermission
+            if isStale && isInactive {
+                sessionsToRemove.append(id)
+            }
+        }
+
+        // Remove stale sessions
+        for id in sessionsToRemove {
+            sessions.removeValue(forKey: id)
+            if activeSessionId == id {
+                activeSessionId = sessions.keys.first
             }
         }
     }
