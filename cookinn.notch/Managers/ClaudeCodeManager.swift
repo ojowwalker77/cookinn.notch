@@ -9,6 +9,9 @@
 import Foundation
 import Network
 import Combine
+import MultipeerConnectivity
+// Note: CookinnShared package must be added to Xcode project
+// For now, we use MultipeerConnectivity directly with raw JSON data
 
 @MainActor
 final class ClaudeCodeServer: ObservableObject {
@@ -18,6 +21,7 @@ final class ClaudeCodeServer: ObservableObject {
 
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var lastError: String?
+    @Published private(set) var connectedPeerCount: Int = 0
 
     // MARK: - Private Properties
 
@@ -29,6 +33,9 @@ final class ClaudeCodeServer: ObservableObject {
     // Stale state timer
     private var staleCheckTimer: Timer?
     private let staleCheckInterval: TimeInterval = 5.0
+
+    // Multipeer for iOS sync
+    private(set) var multipeerManager: NotchMultipeerManager?
 
     // MARK: - Initialization
 
@@ -59,8 +66,68 @@ final class ClaudeCodeServer: ObservableObject {
             // Start stale state checker
             startStaleStateChecker()
 
+            // Start Multipeer advertising for iOS sync
+            startMultipeerAdvertising()
+
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    // MARK: - Multipeer Advertising
+
+    private func startMultipeerAdvertising() {
+        #if os(macOS)
+        let hostName = Host.current().localizedName ?? "Mac"
+        multipeerManager = NotchMultipeerManager(displayName: hostName)
+        multipeerManager?.onPeerConnected = { [weak self] peer in
+            Task { @MainActor in
+                self?.connectedPeerCount = self?.multipeerManager?.connectedPeers.count ?? 0
+                print("[cookinn.notch] iOS device connected: \(peer.displayName)")
+                self?.sendFullStateSync(to: peer)
+            }
+        }
+        multipeerManager?.onPeerDisconnected = { [weak self] _ in
+            Task { @MainActor in
+                self?.connectedPeerCount = self?.multipeerManager?.connectedPeers.count ?? 0
+            }
+        }
+        multipeerManager?.startAdvertising()
+        print("[cookinn.notch] Started Multipeer advertising as '\(hostName)'")
+        #endif
+    }
+
+    private func sendFullStateSync(to peer: MCPeerID) {
+        // Send current sessions as JSON
+        let sessionsArray = NotchState.shared.sessions.values.map { session -> [String: Any] in
+            var dict: [String: Any] = [
+                "id": session.id,
+                "projectPath": session.projectPath,
+                "projectName": session.projectName,
+                "isActive": session.isActive,
+                "isWaitingForPermission": session.isWaitingForPermission,
+                "contextPercent": session.contextPercent
+            ]
+            if let tool = session.activeTool {
+                dict["activeTool"] = [
+                    "id": tool.id,
+                    "name": tool.name,
+                    "displayName": tool.displayName
+                ]
+            }
+            return dict
+        }
+
+        let syncData: [String: Any] = [
+            "type": "fullSync",
+            "sessions": sessionsArray,
+            "pinnedPaths": Array(NotchState.shared.pinnedProjectPaths),
+            "activeSessionId": NotchState.shared.activeSessionId ?? "",
+            "timestamp": ISO8601DateFormatter().string(from: Date())
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: syncData) {
+            multipeerManager?.send(data, to: peer)
         }
     }
 
@@ -71,6 +138,12 @@ final class ClaudeCodeServer: ObservableObject {
         connections.removeAll()
         staleCheckTimer?.invalidate()
         staleCheckTimer = nil
+
+        // Stop Multipeer advertising
+        multipeerManager?.disconnect()
+        multipeerManager = nil
+        connectedPeerCount = 0
+
         isRunning = false
         NotchState.shared.isServerRunning = false
     }
@@ -201,8 +274,21 @@ final class ClaudeCodeServer: ObservableObject {
         do {
             let payload = try JSONDecoder().decode(HookPayload.self, from: data)
 
-            // Process the event
+            // Process the event locally
             NotchState.shared.handleHookEvent(payload)
+
+            // Broadcast to connected iOS devices
+            if let multipeer = multipeerManager, !multipeer.connectedPeers.isEmpty {
+                // Wrap in message envelope and broadcast
+                let envelope: [String: Any] = [
+                    "type": "hookEvent",
+                    "payload": body,
+                    "timestamp": ISO8601DateFormatter().string(from: Date())
+                ]
+                if let envelopeData = try? JSONSerialization.data(withJSONObject: envelope) {
+                    multipeer.broadcast(envelopeData)
+                }
+            }
 
             sendResponse(connection: connection, status: 200, body: "{\"ok\":true}")
 
@@ -290,6 +376,123 @@ final class ClaudeCodeServer: ObservableObject {
                 NotchState.shared.clearStaleStates()
                 NotchState.shared.checkIdleState()
             }
+        }
+    }
+}
+
+// MARK: - Multipeer Manager for iOS Sync
+
+/// Simple Multipeer Connectivity manager for advertising to iOS devices
+@MainActor
+final class NotchMultipeerManager: NSObject, ObservableObject {
+    static let serviceType = "cookinn-notch"  // Max 15 chars, lowercase + hyphen
+
+    @Published private(set) var connectedPeers: [MCPeerID] = []
+    @Published private(set) var isAdvertising: Bool = false
+
+    var onPeerConnected: ((MCPeerID) -> Void)?
+    var onPeerDisconnected: ((MCPeerID) -> Void)?
+
+    private let myPeerID: MCPeerID
+    private var session: MCSession!
+    private var advertiser: MCNearbyServiceAdvertiser?
+
+    init(displayName: String) {
+        self.myPeerID = MCPeerID(displayName: displayName)
+        super.init()
+
+        self.session = MCSession(
+            peer: myPeerID,
+            securityIdentity: nil,
+            encryptionPreference: .required
+        )
+        self.session.delegate = self
+
+        self.advertiser = MCNearbyServiceAdvertiser(
+            peer: myPeerID,
+            discoveryInfo: ["version": "1.0", "platform": "macOS"],
+            serviceType: Self.serviceType
+        )
+        self.advertiser?.delegate = self
+    }
+
+    func startAdvertising() {
+        advertiser?.startAdvertisingPeer()
+        isAdvertising = true
+    }
+
+    func stopAdvertising() {
+        advertiser?.stopAdvertisingPeer()
+        isAdvertising = false
+    }
+
+    func broadcast(_ data: Data) {
+        guard !connectedPeers.isEmpty else { return }
+        do {
+            try session.send(data, toPeers: connectedPeers, with: .reliable)
+        } catch {
+            print("[NotchMultipeer] Broadcast failed: \(error.localizedDescription)")
+        }
+    }
+
+    func send(_ data: Data, to peer: MCPeerID) {
+        do {
+            try session.send(data, toPeers: [peer], with: .reliable)
+        } catch {
+            print("[NotchMultipeer] Send failed: \(error.localizedDescription)")
+        }
+    }
+
+    func disconnect() {
+        session.disconnect()
+        stopAdvertising()
+        connectedPeers.removeAll()
+    }
+}
+
+extension NotchMultipeerManager: MCSessionDelegate {
+    nonisolated func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
+        Task { @MainActor in
+            switch state {
+            case .connected:
+                if !connectedPeers.contains(peerID) {
+                    connectedPeers.append(peerID)
+                    onPeerConnected?(peerID)
+                }
+            case .notConnected:
+                if let index = connectedPeers.firstIndex(of: peerID) {
+                    connectedPeers.remove(at: index)
+                    onPeerDisconnected?(peerID)
+                }
+            case .connecting:
+                break
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    nonisolated func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
+        // Mac doesn't need to receive data from iOS for now
+    }
+
+    nonisolated func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
+    nonisolated func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {}
+    nonisolated func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {}
+}
+
+extension NotchMultipeerManager: MCNearbyServiceAdvertiserDelegate {
+    nonisolated func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
+        Task { @MainActor in
+            print("[NotchMultipeer] Accepting invitation from \(peerID.displayName)")
+            invitationHandler(true, session)
+        }
+    }
+
+    nonisolated func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
+        Task { @MainActor in
+            print("[NotchMultipeer] Failed to start advertising: \(error.localizedDescription)")
+            isAdvertising = false
         }
     }
 }
