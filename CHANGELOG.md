@@ -2,7 +2,7 @@
 
 All notable changes to cookinn.notch will be documented in this file.
 
-## [1.6.1] - 2025-01-12
+## [1.7] - 2025-01-12
 
 ### Performance
 - Optimized animation frame rates for reduced CPU usage and improved battery efficiency
