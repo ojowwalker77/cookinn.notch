@@ -35,7 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var screenObserver: Any?
     private var statusUpdateTimer: Timer?
     private var lastMouseUpdate: Date = .distantPast
-    private let mouseUpdateInterval: TimeInterval = 0.016  // ~60fps throttle
+    private let mouseUpdateInterval: TimeInterval = 0.1  // 10fps throttle (was 60fps)
 
     // Notch dimensions (measured from screen)
     private var notchWidth: CGFloat = 180
@@ -178,7 +178,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func startStatusUpdates() {
         statusUpdateTimer?.invalidate()
-        statusUpdateTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        // Reduced from 2s to 5s - status doesn't need to update that frequently
+        statusUpdateTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             self?.updateStatusMenuItem()
         }
         updateStatusMenuItem()
@@ -340,6 +341,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Monitor global mouse movement for per-screen hover detection
         mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
             guard let self = self else { return }
+
+            // OPTIMIZATION: Skip if windows are not visible
+            let hasVisibleWindows = self.notchWindows.values.contains { $0.isVisible }
+            guard hasVisibleWindows else { return }
 
             // Throttle: skip if too soon since last update (~60fps)
             let now = Date()

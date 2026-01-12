@@ -223,11 +223,11 @@ struct SessionCard: View {
 
     private func startPulseAnimation() {
         guard pulseTimerCancellable == nil else { return }
-        // Fast pulse: 200ms cycle
-        pulseTimerCancellable = Timer.publish(every: 0.2, on: .main, in: .common)
+        // Reduced pulse frequency from 5Hz to 3Hz (40% reduction)
+        pulseTimerCancellable = Timer.publish(every: 0.33, on: .main, in: .common)
             .autoconnect()
             .sink { _ in
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(.easeInOut(duration: 0.33)) {
                     // Alternate between normal and scaled/dimmed
                     if waitingPulseScale > 1.0 {
                         waitingPulseScale = 1.0
@@ -265,13 +265,13 @@ struct SessionCard: View {
                 }
         }
 
-        // Color animation timer
+        // Color animation timer - 10Hz for smooth shimmer (worth the small CPU cost)
         if colorTimerCancellable == nil {
-            colorTimerCancellable = Timer.publish(every: 0.05, on: .main, in: .common)
+            colorTimerCancellable = Timer.publish(every: 0.1, on: .main, in: .common)
                 .autoconnect()
                 .sink { _ in
                     guard self.session?.isActive == true || self.session?.activeTool != nil else { return }
-                    verbColorPhase += 0.02
+                    verbColorPhase += 0.04
                     if verbColorPhase > 1.0 { verbColorPhase = 0.0 }
                 }
         }
@@ -488,7 +488,8 @@ struct ActivityIndicator: View {
 
     private func startAnimationTimer() {
         guard animationTimerCancellable == nil else { return }
-        animationTimerCancellable = Timer.publish(every: 0.04, on: .main, in: .common)
+        // Reduced to 4Hz for minimal CPU impact
+        animationTimerCancellable = Timer.publish(every: 0.25, on: .main, in: .common)
             .autoconnect()
             .sink { now in
                 guard self.shouldAnimate else { return }
@@ -677,11 +678,11 @@ struct WaitingPulseIndicator: View {
 
     private func startPulse() {
         guard timerCancellable == nil else { return }
-        // Fast pulse: 150ms cycle for urgency
-        timerCancellable = Timer.publish(every: 0.15, on: .main, in: .common)
+        // Reduced pulse frequency from ~6.6Hz to 3Hz (55% reduction)
+        timerCancellable = Timer.publish(every: 0.33, on: .main, in: .common)
             .autoconnect()
             .sink { _ in
-                withAnimation(.easeInOut(duration: 0.15)) {
+                withAnimation(.easeInOut(duration: 0.33)) {
                     // Alternate between 0 and 1
                     pulsePhase = pulsePhase > 0.5 ? 0.0 : 1.0
                 }
