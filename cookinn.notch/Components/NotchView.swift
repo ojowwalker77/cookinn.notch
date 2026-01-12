@@ -223,11 +223,11 @@ struct SessionCard: View {
 
     private func startPulseAnimation() {
         guard pulseTimerCancellable == nil else { return }
-        // Fast pulse: 200ms cycle
-        pulseTimerCancellable = Timer.publish(every: 0.2, on: .main, in: .common)
+        // Timer slightly shorter than animation for smoother overlap
+        pulseTimerCancellable = Timer.publish(every: 0.30, on: .main, in: .common)
             .autoconnect()
             .sink { _ in
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(.easeInOut(duration: 0.33)) {
                     // Alternate between normal and scaled/dimmed
                     if waitingPulseScale > 1.0 {
                         waitingPulseScale = 1.0
@@ -265,13 +265,13 @@ struct SessionCard: View {
                 }
         }
 
-        // Color animation timer
+        // Color animation timer - 10Hz for smooth shimmer (worth the small CPU cost)
         if colorTimerCancellable == nil {
-            colorTimerCancellable = Timer.publish(every: 0.05, on: .main, in: .common)
+            colorTimerCancellable = Timer.publish(every: 0.1, on: .main, in: .common)
                 .autoconnect()
                 .sink { _ in
                     guard self.session?.isActive == true || self.session?.activeTool != nil else { return }
-                    verbColorPhase += 0.02
+                    verbColorPhase += 0.04
                     if verbColorPhase > 1.0 { verbColorPhase = 0.0 }
                 }
         }
@@ -488,6 +488,7 @@ struct ActivityIndicator: View {
 
     private func startAnimationTimer() {
         guard animationTimerCancellable == nil else { return }
+        // 25Hz to support fastest pattern (chaos: 0.04s). Slower patterns throttled by effectiveInterval
         animationTimerCancellable = Timer.publish(every: 0.04, on: .main, in: .common)
             .autoconnect()
             .sink { now in
@@ -677,11 +678,11 @@ struct WaitingPulseIndicator: View {
 
     private func startPulse() {
         guard timerCancellable == nil else { return }
-        // Fast pulse: 150ms cycle for urgency
-        timerCancellable = Timer.publish(every: 0.15, on: .main, in: .common)
+        // Timer slightly shorter than animation for smoother overlap
+        timerCancellable = Timer.publish(every: 0.30, on: .main, in: .common)
             .autoconnect()
             .sink { _ in
-                withAnimation(.easeInOut(duration: 0.15)) {
+                withAnimation(.easeInOut(duration: 0.33)) {
                     // Alternate between 0 and 1
                     pulsePhase = pulsePhase > 0.5 ? 0.0 : 1.0
                 }
