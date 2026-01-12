@@ -7,7 +7,7 @@ All notable changes to cookinn.notch will be documented in this file.
 ### Performance
 - Optimized animation frame rates for reduced CPU usage and improved battery efficiency
 - Fine-tuned timer frequencies across UI components for better resource management
-- Reduced mouse tracking polling rate when windows are visible
+- Reduced mouse tracking polling rate from 60fps to 10fps and skip tracking entirely when windows are hidden
 - Adjusted status update intervals for optimal balance between responsiveness and efficiency
 
 ## [1.6] - 2025-01-10

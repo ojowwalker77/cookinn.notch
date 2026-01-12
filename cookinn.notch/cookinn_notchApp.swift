@@ -346,7 +346,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let hasVisibleWindows = self.notchWindows.values.contains { $0.isVisible }
             guard hasVisibleWindows else { return }
 
-            // Throttle: skip if too soon since last update (~60fps)
+            // Throttle: skip if too soon since last update (10fps)
             let now = Date()
             guard now.timeIntervalSince(self.lastMouseUpdate) >= self.mouseUpdateInterval else { return }
             self.lastMouseUpdate = now

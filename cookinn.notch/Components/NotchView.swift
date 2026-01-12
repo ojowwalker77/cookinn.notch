@@ -223,8 +223,8 @@ struct SessionCard: View {
 
     private func startPulseAnimation() {
         guard pulseTimerCancellable == nil else { return }
-        // Reduced pulse frequency from 5Hz to 3Hz (40% reduction)
-        pulseTimerCancellable = Timer.publish(every: 0.33, on: .main, in: .common)
+        // Timer slightly shorter than animation for smoother overlap
+        pulseTimerCancellable = Timer.publish(every: 0.30, on: .main, in: .common)
             .autoconnect()
             .sink { _ in
                 withAnimation(.easeInOut(duration: 0.33)) {
@@ -488,8 +488,8 @@ struct ActivityIndicator: View {
 
     private func startAnimationTimer() {
         guard animationTimerCancellable == nil else { return }
-        // Reduced to 4Hz for minimal CPU impact
-        animationTimerCancellable = Timer.publish(every: 0.25, on: .main, in: .common)
+        // 25Hz to support fastest pattern (chaos: 0.04s). Slower patterns throttled by effectiveInterval
+        animationTimerCancellable = Timer.publish(every: 0.04, on: .main, in: .common)
             .autoconnect()
             .sink { now in
                 guard self.shouldAnimate else { return }
@@ -678,8 +678,8 @@ struct WaitingPulseIndicator: View {
 
     private func startPulse() {
         guard timerCancellable == nil else { return }
-        // Reduced pulse frequency from ~6.6Hz to 3Hz (55% reduction)
-        timerCancellable = Timer.publish(every: 0.33, on: .main, in: .common)
+        // Timer slightly shorter than animation for smoother overlap
+        timerCancellable = Timer.publish(every: 0.30, on: .main, in: .common)
             .autoconnect()
             .sink { _ in
                 withAnimation(.easeInOut(duration: 0.33)) {
