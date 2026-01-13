@@ -2,7 +2,7 @@
 
 A minimal companion for [Claude Code](https://claude.ai/code) on macOS. Shows what Claude is doing. Nothing more, nothing less.
 
-https://github.com/user-attachments/assets/74e9dfa9-52a3-435a-98ff-15dbf05fc3d7
+[https://github.com/user-attachments/assets/74e9dfa9-52a3-435a-98ff-15dbf05fc3d7](https://github.com/user-attachments/assets/ec6e6b29-ef8c-4259-8c44-5c894def5494)
 
 ## Installation
 
