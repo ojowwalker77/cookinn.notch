@@ -122,6 +122,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         alertSoundsItem.state = NotchState.shared.alertSoundsEnabled ? .on : .off
         menu.addItem(alertSoundsItem)
 
+        let showRalphLoopsItem = NSMenuItem(title: "Show Ralph Loops", action: #selector(toggleShowRalphLoops), keyEquivalent: "")
+        showRalphLoopsItem.tag = 105
+        showRalphLoopsItem.state = NotchState.shared.showRalphLoops ? .on : .off
+        menu.addItem(showRalphLoopsItem)
+
         menu.addItem(NSMenuItem.separator())
 
         let statusMenuItem = NSMenuItem(title: "Status: Starting...", action: nil, keyEquivalent: "")
@@ -556,6 +561,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let menu = statusItem?.menu,
            let item = menu.item(withTag: 103) {
             item.state = NotchState.shared.alertSoundsEnabled ? .on : .off
+        }
+    }
+
+    @objc func toggleShowRalphLoops() {
+        NotchState.shared.showRalphLoops.toggle()
+
+        // Update menu item checkmark
+        if let menu = statusItem?.menu,
+           let item = menu.item(withTag: 105) {
+            item.state = NotchState.shared.showRalphLoops ? .on : .off
         }
     }
 

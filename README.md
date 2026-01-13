@@ -49,6 +49,7 @@ Sessions automatically appear in notch when started. No setup needed.
 - Context window usage
 - Activity patterns
 - **Alert mode**: Pulses red when Claude needs your permission/input, with optional sound alerts
+- **Ralph Loop Detection**: Shows autonomous loop progress from [Ralph Wiggum](https://github.com/th0rgal/ralph-wiggum) (OpenCode) and [Ralph for Claude Code](https://github.com/ojowwalker77/ralph-claude-code)
 
 > Fun fact: The alert sound was designed and crafted by hand by the author (@ojowwalker77).
 
@@ -61,6 +62,15 @@ Sessions automatically appear in notch when started. No setup needed.
 
 - macOS 15.0 (Sequoia) or later
 - Claude Code CLI
+
+## Credits
+
+This project includes Ralph loop detection, made possible by:
+
+- **[Ralph Wiggum](https://github.com/th0rgal/ralph-wiggum)** by [@th0rgal](https://github.com/th0rgal) - The original Ralph loop implementation for OpenCode
+- **[Ralph for Claude Code](https://github.com/ojowwalker77/ralph-claude-code)** - Ralph loop adaptation for Claude Code CLI
+
+Thank you to the creators for pioneering autonomous AI development loops!
 
 ## License
 

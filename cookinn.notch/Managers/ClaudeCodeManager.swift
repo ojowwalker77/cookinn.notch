@@ -289,6 +289,7 @@ final class ClaudeCodeServer: ObservableObject {
             Task { @MainActor in
                 NotchState.shared.clearStaleStates()
                 NotchState.shared.checkIdleState()
+                RalphLoopManager.shared.checkRalphLoops()  // Delegate to RalphLoopManager
             }
         }
     }

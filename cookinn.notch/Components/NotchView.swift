@@ -116,6 +116,10 @@ struct SessionCard: View {
         if isWaitingForPermission {
             return .red  // Urgent attention - waiting for user
         }
+        // Ralph loop colors: Orange for Claude Code, Purple for OpenCode
+        if isInRalphLoop {
+            return ralphColor
+        }
         if let tool = session?.activeTool {
             return tool.color
         }
@@ -125,6 +129,18 @@ struct SessionCard: View {
             return ConfigManager.shared.swiftUIColor(for: thinkingInfo.color)
         }
         return .gray
+    }
+
+    /// Color for Ralph loops: Orange for Claude Code, Purple for OpenCode
+    private var ralphColor: Color {
+        switch session?.ralphSource {
+        case "claude":
+            return .orange  // Classic Claude Code color
+        case "opencode":
+            return .purple  // OpenCode color
+        default:
+            return .purple  // Default fallback
+        }
     }
 
     private var contextPercent: Double {
@@ -138,8 +154,28 @@ struct SessionCard: View {
         return .white.opacity(0.5)
     }
 
+    private var isInRalphLoop: Bool {
+        session?.isInRalphLoop ?? false
+    }
+
+    private var ralphIterationDisplay: String? {
+        session?.ralphIterationDisplay
+    }
+
     var body: some View {
         HStack(spacing: 8) {
+            // Ralph loop iteration (shown when in loop, before context percent)
+            if isInRalphLoop, let iteration = ralphIterationDisplay {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.trianglehead.2.counterclockwise.rotate.90")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(ralphColor)
+                    Text(iteration)
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundColor(ralphColor)
+                }
+            }
+
             // Context percentage (far left, only show when > 0)
             if contextPercent > 0 {
                 Text("\(Int(contextPercent))%")
@@ -327,7 +363,16 @@ struct SessionCard: View {
         }
 
         if session.isActive {
+            // Show "Ralphing" when in a Ralph loop, otherwise rotating fun verbs
+            if session.isInRalphLoop {
+                return "Ralphing"
+            }
             return currentFunVerb
+        }
+
+        // Idle but in a Ralph loop (between iterations)
+        if session.isInRalphLoop {
+            return "Ralphing"
         }
 
         return "Idle"
@@ -401,12 +446,24 @@ struct ActivityIndicator: View {
 
     private var patternName: String {
         if let tool = tool {
+            // Use loop pattern when in a Ralph loop
+            if session?.isInRalphLoop == true {
+                return "loop"
+            }
             return tool.pattern
         }
         if session?.isActive == true {
+            // Use loop pattern when in a Ralph loop
+            if session?.isInRalphLoop == true {
+                return "loop"
+            }
             // Get pattern from thinking state config (cogitate - fast and confident)
             let thinkingInfo = ConfigManager.shared.resolveStateInfo(for: "thinking")
             return thinkingInfo.pattern
+        }
+        // Idle but in Ralph loop - still show loop pattern
+        if session?.isInRalphLoop == true {
+            return "loop"
         }
         return "dormant"  // Idle state
     }
@@ -416,6 +473,17 @@ struct ActivityIndicator: View {
     }
 
     private var activeColor: Color {
+        // Ralph loop colors: Orange for Claude Code, Purple for OpenCode
+        if session?.isInRalphLoop == true {
+            switch session?.ralphSource {
+            case "claude":
+                return .orange
+            case "opencode":
+                return .purple
+            default:
+                return .purple
+            }
+        }
         if let tool = tool {
             return tool.color
         }

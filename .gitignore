@@ -64,3 +64,8 @@ dmg-contents/
 # Local development
 tasks/
 opencode.json
+
+# Ralph loop repos (cloned for reference)
+opencode-ralph-wiggum/
+ralph-claude-code/
+ralph-test-project/
