@@ -33,6 +33,10 @@ final class RalphLoopManager {
     /// How often to do a full scan for new Ralph loops (seconds)
     private let fullScanInterval: TimeInterval = 30.0
 
+    /// Staleness threshold for Claude Code Ralph status.json (seconds)
+    /// If no update within this time, the loop is considered dead
+    private static let staleThreshold: TimeInterval = 90.0
+
     // MARK: - Initialization
 
     private init() {}
@@ -158,20 +162,25 @@ final class RalphLoopManager {
         let statusPath = (projectPath as NSString).appendingPathComponent("status.json")
         let fileURL = URL(fileURLWithPath: statusPath)
 
-        guard fileManager.fileExists(atPath: statusPath),
-              let data = try? Data(contentsOf: fileURL),
-              let state = try? JSONDecoder().decode(ClaudeCodeRalphState.self, from: data) else {
-            return nil
-        }
+        guard fileManager.fileExists(atPath: statusPath) else { return nil }
 
-        // Verify the status.json was recently updated (within last 90 seconds)
+        // Check file modification time BEFORE decoding to avoid race condition
+        // where file is being written to during our read
         // Claude Code Ralph updates status.json frequently during active loops
         // If it hasn't been updated, the loop likely finished or crashed
         if let modDate = try? fileManager.attributesOfItem(atPath: statusPath)[.modificationDate] as? Date {
             let age = Date().timeIntervalSince(modDate)
-            if age > 90 { // 90 seconds - if no update, loop is dead
+            if age > Self.staleThreshold { // If no update, loop is dead
                 return nil
             }
+        } else {
+            return nil
+        }
+
+        // Now decode if file is recent enough
+        guard let data = try? Data(contentsOf: fileURL),
+              let state = try? JSONDecoder().decode(ClaudeCodeRalphState.self, from: data) else {
+            return nil
         }
 
         return state
