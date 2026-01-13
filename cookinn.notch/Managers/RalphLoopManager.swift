@@ -89,9 +89,16 @@ final class RalphLoopManager {
     }
 
     private func detectOpenCodeRalph(at projectPath: String) -> OpenCodeRalphState? {
+        let fm = FileManager.default
         let path = (projectPath as NSString).appendingPathComponent(".opencode/ralph-loop.state.json")
-        guard FileManager.default.fileExists(atPath: path),
-              let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+
+        guard fm.fileExists(atPath: path) else { return nil }
+
+        // Check staleness before decoding to avoid reading partially-written or abandoned state files
+        guard let modDate = try? fm.attributesOfItem(atPath: path)[.modificationDate] as? Date,
+              Date().timeIntervalSince(modDate) <= Self.staleThreshold else { return nil }
+
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let state = try? JSONDecoder().decode(OpenCodeRalphState.self, from: data) else { return nil }
         return state
     }
@@ -103,7 +110,7 @@ final class RalphLoopManager {
         
         guard fm.fileExists(atPath: promptPath), fm.fileExists(atPath: statusPath) else { return nil }
 
-        // Check staleness before decoding to avoid race condition
+        // Check staleness before decoding to avoid reading partially-written or abandoned state files
         guard let modDate = try? fm.attributesOfItem(atPath: statusPath)[.modificationDate] as? Date,
               Date().timeIntervalSince(modDate) <= Self.staleThreshold else { return nil }
 

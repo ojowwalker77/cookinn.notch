@@ -53,8 +53,9 @@ struct ClaudeCodeRalphState: Codable, Equatable {
     let exit_reason: String
     let next_reset: String
 
+    /// Only "running" is active; "success" and "error" are terminal states
     var isActive: Bool {
-        status == "running" || status == "success"
+        status == "running"
     }
 
     /// Display string for iteration (just count, no max for Claude Code Ralph)
@@ -1057,12 +1058,11 @@ final class NotchState: ObservableObject {
             }
         } else {
             let projectName = URL(fileURLWithPath: path).lastPathComponent
-            let pathSuffix = normalized.replacingOccurrences(of: "/", with: "-").prefix(100)
-            let sessionId = "opencode-ralph-\(pathSuffix)"
+            let sessionId = "opencode-ralph-\(UUID().uuidString)"
 
             var session = SessionState(
                 id: sessionId,
-                projectPath: path,
+                projectPath: normalized,
                 projectName: projectName,
                 permissionMode: "opencode-ralph",
                 startTime: state.startDate ?? Date(),
@@ -1095,12 +1095,11 @@ final class NotchState: ObservableObject {
             }
         } else {
             let projectName = URL(fileURLWithPath: path).lastPathComponent
-            let pathSuffix = normalized.replacingOccurrences(of: "/", with: "-").prefix(100)
-            let sessionId = "claude-ralph-\(pathSuffix)"
+            let sessionId = "claude-ralph-\(UUID().uuidString)"
 
             var session = SessionState(
                 id: sessionId,
-                projectPath: path,
+                projectPath: normalized,
                 projectName: projectName,
                 permissionMode: "claude-ralph",
                 startTime: state.timestampDate ?? Date(),
