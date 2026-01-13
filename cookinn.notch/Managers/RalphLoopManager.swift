@@ -2,8 +2,6 @@
 //  RalphLoopManager.swift
 //  cookinn.notch
 //
-//  Handles detection of Ralph loops from both Claude Code and OpenCode
-//
 
 import Foundation
 
@@ -11,47 +9,19 @@ import Foundation
 final class RalphLoopManager {
     static let shared = RalphLoopManager()
 
-    // MARK: - Configuration
-
-    /// Directories to scan for Ralph loops (first-level subdirectories only)
-    private static let scanDirectories: [String] = [
-        "~/www",
-        "~/projects",
-        "~/code",
-        "~/dev",
-        "~/Developer"
-    ]
-
-    // MARK: - State
-
-    /// Cache of known project paths with Ralph loops
-    private var knownRalphPaths: Set<String> = []
-
-    /// Last time we did a full directory scan
-    private var lastFullScanTime: Date = .distantPast
-
-    /// How often to do a full scan for new Ralph loops (seconds)
-    private let fullScanInterval: TimeInterval = 30.0
-
-    /// Staleness threshold for Claude Code Ralph status.json (seconds)
-    /// If no update within this time, the loop is considered dead
+    private static let scanDirectories = ["~/www", "~/projects", "~/code", "~/dev", "~/Developer"]
     private static let staleThreshold: TimeInterval = 90.0
-
-    // MARK: - Initialization
+    
+    private var knownRalphPaths: Set<String> = []
+    private var lastFullScanTime: Date = .distantPast
+    private let fullScanInterval: TimeInterval = 30.0
 
     private init() {}
 
-    // MARK: - Detection Entry Point
-
-    /// Main entry point - called periodically by ClaudeCodeServer
     func checkRalphLoops() {
-        // Skip if Ralph loops are disabled in settings
         guard NotchState.shared.showRalphLoops else { return }
-
-        // Quick check: monitor known paths every tick
         checkKnownPaths()
 
-        // Full scan: discover new Ralph loops periodically
         let now = Date()
         if now.timeIntervalSince(lastFullScanTime) > fullScanInterval {
             lastFullScanTime = now
@@ -59,34 +29,28 @@ final class RalphLoopManager {
         }
     }
 
-    // MARK: - Known Path Monitoring
-
-    /// Check known Ralph paths (fast, runs every tick)
     private func checkKnownPaths() {
         var pathsToRemove: [String] = []
 
         for projectPath in knownRalphPaths {
-            // Try OpenCode Ralph first
-            if let openCodeState = detectOpenCodeRalph(at: projectPath) {
-                if openCodeState.active {
-                    NotchState.shared.ensureOpenCodeRalphSession(forProjectPath: projectPath, state: openCodeState)
+            if let state = detectOpenCodeRalph(at: projectPath) {
+                if state.active {
+                    NotchState.shared.ensureOpenCodeRalphSession(forProjectPath: projectPath, state: state)
                 } else {
-                    NotchState.shared.updateOpenCodeRalphState(forProjectPath: projectPath, state: openCodeState)
+                    NotchState.shared.updateOpenCodeRalphState(forProjectPath: projectPath, state: state)
                 }
                 continue
             }
 
-            // Try Claude Code Ralph
-            if let claudeCodeState = detectClaudeCodeRalph(at: projectPath) {
-                if claudeCodeState.isActive {
-                    NotchState.shared.ensureClaudeCodeRalphSession(forProjectPath: projectPath, state: claudeCodeState)
+            if let state = detectClaudeCodeRalph(at: projectPath) {
+                if state.isActive {
+                    NotchState.shared.ensureClaudeCodeRalphSession(forProjectPath: projectPath, state: state)
                 } else {
-                    NotchState.shared.updateClaudeCodeRalphState(forProjectPath: projectPath, state: claudeCodeState)
+                    NotchState.shared.updateClaudeCodeRalphState(forProjectPath: projectPath, state: state)
                 }
                 continue
             }
 
-            // No Ralph state found - clear and remove from known paths
             NotchState.shared.updateOpenCodeRalphState(forProjectPath: projectPath, state: nil)
             NotchState.shared.updateClaudeCodeRalphState(forProjectPath: projectPath, state: nil)
             pathsToRemove.append(projectPath)
@@ -97,92 +61,54 @@ final class RalphLoopManager {
         }
     }
 
-    // MARK: - Discovery
-
-    /// Discover new Ralph loops by scanning directories (slower, runs periodically)
     private func discoverNewRalphLoops() {
-        let fileManager = FileManager.default
+        let fm = FileManager.default
 
         for baseDir in Self.scanDirectories {
             let expandedPath = NSString(string: baseDir).expandingTildeInPath
-
-            guard fileManager.fileExists(atPath: expandedPath) else { continue }
-            guard let contents = try? fileManager.contentsOfDirectory(atPath: expandedPath) else { continue }
+            guard fm.fileExists(atPath: expandedPath),
+                  let contents = try? fm.contentsOfDirectory(atPath: expandedPath) else { continue }
 
             for item in contents {
                 let projectPath = (expandedPath as NSString).appendingPathComponent(item)
-                var isDirectory: ObjCBool = false
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: projectPath, isDirectory: &isDir), isDir.boolValue else { continue }
 
-                guard fileManager.fileExists(atPath: projectPath, isDirectory: &isDirectory),
-                      isDirectory.boolValue else { continue }
-
-                // Check for OpenCode Ralph
-                if let openCodeState = detectOpenCodeRalph(at: projectPath), openCodeState.active {
+                if let state = detectOpenCodeRalph(at: projectPath), state.active {
                     knownRalphPaths.insert(projectPath)
-                    NotchState.shared.ensureOpenCodeRalphSession(forProjectPath: projectPath, state: openCodeState)
+                    NotchState.shared.ensureOpenCodeRalphSession(forProjectPath: projectPath, state: state)
                     continue
                 }
 
-                // Check for Claude Code Ralph
-                if let claudeCodeState = detectClaudeCodeRalph(at: projectPath), claudeCodeState.isActive {
+                if let state = detectClaudeCodeRalph(at: projectPath), state.isActive {
                     knownRalphPaths.insert(projectPath)
-                    NotchState.shared.ensureClaudeCodeRalphSession(forProjectPath: projectPath, state: claudeCodeState)
+                    NotchState.shared.ensureClaudeCodeRalphSession(forProjectPath: projectPath, state: state)
                 }
             }
         }
     }
 
-    // MARK: - OpenCode Ralph Detection
-
-    /// Detect OpenCode Ralph loop state (from .opencode/ralph-loop.state.json)
     private func detectOpenCodeRalph(at projectPath: String) -> OpenCodeRalphState? {
-        let stateFilePath = (projectPath as NSString).appendingPathComponent(".opencode/ralph-loop.state.json")
-        let fileURL = URL(fileURLWithPath: stateFilePath)
-
-        guard FileManager.default.fileExists(atPath: stateFilePath),
-              let data = try? Data(contentsOf: fileURL),
-              let state = try? JSONDecoder().decode(OpenCodeRalphState.self, from: data) else {
-            return nil
-        }
-
+        let path = (projectPath as NSString).appendingPathComponent(".opencode/ralph-loop.state.json")
+        guard FileManager.default.fileExists(atPath: path),
+              let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let state = try? JSONDecoder().decode(OpenCodeRalphState.self, from: data) else { return nil }
         return state
     }
 
-    // MARK: - Claude Code Ralph Detection
-
-    /// Detect Claude Code Ralph loop state (from status.json + PROMPT.md indicator)
     private func detectClaudeCodeRalph(at projectPath: String) -> ClaudeCodeRalphState? {
-        let fileManager = FileManager.default
-
-        // Check for PROMPT.md (indicator that this is a Ralph project)
+        let fm = FileManager.default
         let promptPath = (projectPath as NSString).appendingPathComponent("PROMPT.md")
-        guard fileManager.fileExists(atPath: promptPath) else { return nil }
-
-        // Check for status.json
         let statusPath = (projectPath as NSString).appendingPathComponent("status.json")
-        let fileURL = URL(fileURLWithPath: statusPath)
+        
+        guard fm.fileExists(atPath: promptPath), fm.fileExists(atPath: statusPath) else { return nil }
 
-        guard fileManager.fileExists(atPath: statusPath) else { return nil }
+        // Check staleness before decoding to avoid race condition
+        guard let modDate = try? fm.attributesOfItem(atPath: statusPath)[.modificationDate] as? Date,
+              Date().timeIntervalSince(modDate) <= Self.staleThreshold else { return nil }
 
-        // Check file modification time BEFORE decoding to avoid race condition
-        // where file is being written to during our read
-        // Claude Code Ralph updates status.json frequently during active loops
-        // If it hasn't been updated, the loop likely finished or crashed
-        if let modDate = try? fileManager.attributesOfItem(atPath: statusPath)[.modificationDate] as? Date {
-            let age = Date().timeIntervalSince(modDate)
-            if age > Self.staleThreshold { // If no update, loop is dead
-                return nil
-            }
-        } else {
-            return nil
-        }
-
-        // Now decode if file is recent enough
-        guard let data = try? Data(contentsOf: fileURL),
-              let state = try? JSONDecoder().decode(ClaudeCodeRalphState.self, from: data) else {
-            return nil
-        }
-
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: statusPath)),
+              let state = try? JSONDecoder().decode(ClaudeCodeRalphState.self, from: data) else { return nil }
         return state
     }
 }

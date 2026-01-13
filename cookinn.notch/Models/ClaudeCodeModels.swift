@@ -1057,8 +1057,6 @@ final class NotchState: ObservableObject {
             }
         } else {
             let projectName = URL(fileURLWithPath: path).lastPathComponent
-            // Use path-based ID for stability across app restarts
-            // hashValue is not stable in Swift across launches
             let pathSuffix = normalized.replacingOccurrences(of: "/", with: "-").prefix(100)
             let sessionId = "opencode-ralph-\(pathSuffix)"
 
@@ -1097,8 +1095,6 @@ final class NotchState: ObservableObject {
             }
         } else {
             let projectName = URL(fileURLWithPath: path).lastPathComponent
-            // Use path-based ID for stability across app restarts
-            // hashValue is not stable in Swift across launches  
             let pathSuffix = normalized.replacingOccurrences(of: "/", with: "-").prefix(100)
             let sessionId = "claude-ralph-\(pathSuffix)"
 
