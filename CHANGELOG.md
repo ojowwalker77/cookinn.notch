@@ -2,6 +2,21 @@
 
 All notable changes to cookinn.notch will be documented in this file.
 
+## [1.8] - 2025-01-13
+
+### Added
+- **Ralph Loop Detection**: Monitor autonomous AI development loops running in the background
+  - OpenCode Ralph loops shown with purple indicator and iteration progress (e.g., `🔄 10/200`)
+  - Claude Code Ralph loops shown with orange indicator and loop count (e.g., `🔄 5`)
+  - Displays "Ralphing" status verb when loops are active
+  - Auto-pins projects when loops are detected
+  - Auto-dismisses when loops complete (90-second staleness detection)
+- **Show Ralph Loops** setting in menu (enabled by default)
+
+### Architecture
+- New `RalphLoopManager.swift` for centralized Ralph detection
+- Supports both OpenCode Ralph (`.opencode/ralph-loop.state.json`) and Claude Code Ralph (`status.json`)
+
 ## [1.7] - 2025-01-12
 
 ### Performance

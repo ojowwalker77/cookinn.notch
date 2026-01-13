@@ -1,8 +1,8 @@
 # cookinn.notch
 
-A minimal companion for [Claude Code](https://claude.ai/code) on macOS. Shows what Claude is doing. Nothing more, nothing less.
+A minimal companion for [Claude Code](https://claude.ai/code) on macOS (working on the Opencode support). Shows what Claude is doing. Nothing more, nothing less.
 
-https://github.com/user-attachments/assets/74e9dfa9-52a3-435a-98ff-15dbf05fc3d7
+[https://github.com/user-attachments/assets/74e9dfa9-52a3-435a-98ff-15dbf05fc3d7](https://github.com/user-attachments/assets/ec6e6b29-ef8c-4259-8c44-5c894def5494)
 
 ## Installation
 
@@ -49,6 +49,7 @@ Sessions automatically appear in notch when started. No setup needed.
 - Context window usage
 - Activity patterns
 - **Alert mode**: Pulses red when Claude needs your permission/input, with optional sound alerts
+- **Ralph Loop Detection**: Shows autonomous loop progress from [Ralph Wiggum](https://github.com/th0rgal/ralph-wiggum) (OpenCode) and [Ralph for Claude Code](https://github.com/ojowwalker77/ralph-claude-code)
 
 > Fun fact: The alert sound was designed and crafted by hand by the author (@ojowwalker77).
 
@@ -61,6 +62,15 @@ Sessions automatically appear in notch when started. No setup needed.
 
 - macOS 15.0 (Sequoia) or later
 - Claude Code CLI
+
+## Credits
+
+This project includes Ralph loop detection, made possible by:
+
+- **[Ralph Wiggum](https://github.com/th0rgal/ralph-wiggum)** by [@th0rgal](https://github.com/th0rgal) - The original Ralph loop implementation for OpenCode
+- **[Ralph for Claude Code](https://github.com/ojowwalker77/ralph-claude-code)** - Ralph loop adaptation for Claude Code CLI
+
+Thank you to the creators for pioneering autonomous AI development loops!
 
 ## License
 

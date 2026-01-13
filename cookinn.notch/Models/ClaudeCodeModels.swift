@@ -9,6 +9,72 @@ import Foundation
 import Combine
 import SwiftUI
 
+// MARK: - OpenCode Ralph Loop State (from .opencode/ralph-loop.state.json)
+
+struct OpenCodeRalphState: Codable, Equatable {
+    let active: Bool
+    let iteration: Int
+    let maxIterations: Int
+    let completionPromise: String
+    let prompt: String
+    let startedAt: String
+    let model: String
+
+    /// Parse startedAt ISO string to Date
+    var startDate: Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: startedAt) {
+            return date
+        }
+        // Try without fractional seconds
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: startedAt)
+    }
+
+    /// Display string for iteration progress (e.g., "3/10" or "3/∞")
+    var iterationDisplay: String {
+        if maxIterations > 0 {
+            return "\(iteration)/\(maxIterations)"
+        }
+        return "\(iteration)/∞"
+    }
+}
+
+// MARK: - Claude Code Ralph Loop State (from status.json)
+
+struct ClaudeCodeRalphState: Codable, Equatable {
+    let timestamp: String
+    let loop_count: Int
+    let calls_made_this_hour: Int
+    let max_calls_per_hour: Int
+    let last_action: String
+    let status: String  // "success", "running", "error"
+    let exit_reason: String
+    let next_reset: String
+
+    /// Only "running" is active; "success" and "error" are terminal states
+    var isActive: Bool {
+        status == "running"
+    }
+
+    /// Display string for iteration (just count, no max for Claude Code Ralph)
+    var iterationDisplay: String {
+        "\(loop_count)"
+    }
+
+    /// Parse timestamp to Date
+    var timestampDate: Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: timestamp) {
+            return date
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: timestamp)
+    }
+}
+
 // MARK: - Hook Event Payload (from unified hook)
 
 struct HookPayload: Codable {
@@ -288,6 +354,34 @@ struct SessionState: Identifiable, Equatable {
     var contextPercent: Double = 0.0
     var contextTokens: Int = 0
 
+    // Ralph Loop tracking - supports both OpenCode and Claude Code Ralph
+    var openCodeRalphState: OpenCodeRalphState?
+    var claudeCodeRalphState: ClaudeCodeRalphState?
+
+    /// Whether this session is in a Ralph loop (either type)
+    var isInRalphLoop: Bool {
+        (openCodeRalphState?.active ?? false) ||
+        (claudeCodeRalphState?.isActive ?? false)
+    }
+
+    /// The iteration display string for the active Ralph loop
+    var ralphIterationDisplay: String? {
+        if let cc = claudeCodeRalphState, cc.isActive {
+            return cc.iterationDisplay
+        }
+        if let oc = openCodeRalphState, oc.active {
+            return oc.iterationDisplay
+        }
+        return nil
+    }
+
+    /// Which Ralph source is active: "claude" or "opencode"
+    var ralphSource: String? {
+        if claudeCodeRalphState?.isActive == true { return "claude" }
+        if openCodeRalphState?.active == true { return "opencode" }
+        return nil
+    }
+
     var displayName: String {
         projectName.isEmpty ? "Claude Code" : projectName
     }
@@ -324,7 +418,9 @@ struct SessionState: Identifiable, Equatable {
         lhs.isActive == rhs.isActive &&
         lhs.isWaitingForPermission == rhs.isWaitingForPermission &&
         lhs.lastActivityTime == rhs.lastActivityTime &&
-        lhs.contextPercent == rhs.contextPercent
+        lhs.contextPercent == rhs.contextPercent &&
+        lhs.openCodeRalphState == rhs.openCodeRalphState &&
+        lhs.claudeCodeRalphState == rhs.claudeCodeRalphState
     }
 }
 
@@ -399,6 +495,7 @@ final class NotchState: ObservableObject {
     private static let showOnAllMonitorsKey = "NotchShowOnAllMonitors"
     private static let selectedDisplayIDKey = "NotchSelectedDisplayID"
     private static let alertSoundsEnabledKey = "NotchAlertSoundsEnabled"
+    private static let showRalphLoopsKey = "NotchShowRalphLoops"
     private var isLoadingSettings = false
 
     // Settings
@@ -413,6 +510,13 @@ final class NotchState: ObservableObject {
         didSet {
             guard !isLoadingSettings else { return }
             UserDefaults.standard.set(alertSoundsEnabled, forKey: Self.alertSoundsEnabledKey)
+        }
+    }
+
+    @Published var showRalphLoops: Bool = true {
+        didSet {
+            guard !isLoadingSettings else { return }
+            UserDefaults.standard.set(showRalphLoops, forKey: Self.showRalphLoopsKey)
         }
     }
 
@@ -513,6 +617,13 @@ final class NotchState: ObservableObject {
             alertSoundsEnabled = UserDefaults.standard.bool(forKey: Self.alertSoundsEnabledKey)
         } else {
             alertSoundsEnabled = true  // Default enabled
+        }
+
+        // Load show Ralph loops setting (default to true if not set)
+        if UserDefaults.standard.object(forKey: Self.showRalphLoopsKey) != nil {
+            showRalphLoops = UserDefaults.standard.bool(forKey: Self.showRalphLoopsKey)
+        } else {
+            showRalphLoops = true  // Default enabled
         }
 
         isLoadingSettings = false
@@ -902,6 +1013,110 @@ final class NotchState: ObservableObject {
 
     func unpinAllSessions() {
         unpinAllProjects()
+    }
+
+    // MARK: - Ralph Loop State Updates
+
+    /// Update OpenCode Ralph state for all sessions matching a project path
+    func updateOpenCodeRalphState(forProjectPath path: String, state: OpenCodeRalphState?) {
+        let normalized = normalizePath(path)
+
+        for (sessionId, session) in sessions {
+            let sessionPath = normalizePath(session.projectPath)
+            if sessionPath == normalized {
+                if sessions[sessionId]?.openCodeRalphState != state {
+                    sessions[sessionId]?.openCodeRalphState = state
+                }
+            }
+        }
+    }
+
+    /// Update Claude Code Ralph state for all sessions matching a project path
+    func updateClaudeCodeRalphState(forProjectPath path: String, state: ClaudeCodeRalphState?) {
+        let normalized = normalizePath(path)
+
+        for (sessionId, session) in sessions {
+            let sessionPath = normalizePath(session.projectPath)
+            if sessionPath == normalized {
+                if sessions[sessionId]?.claudeCodeRalphState != state {
+                    sessions[sessionId]?.claudeCodeRalphState = state
+                }
+            }
+        }
+    }
+
+    /// Ensure a session exists for an OpenCode Ralph loop
+    func ensureOpenCodeRalphSession(forProjectPath path: String, state: OpenCodeRalphState) {
+        let normalized = normalizePath(path)
+        let existingSession = sessions.values.first { normalizePath($0.projectPath) == normalized }
+
+        if let existingSession = existingSession {
+            if existingSession.openCodeRalphState != state {
+                sessions[existingSession.id]?.openCodeRalphState = state
+                sessions[existingSession.id]?.isActive = state.active
+                sessions[existingSession.id]?.lastActivityTime = Date()
+            }
+        } else {
+            let projectName = URL(fileURLWithPath: path).lastPathComponent
+            let sessionId = "opencode-ralph-\(UUID().uuidString)"
+
+            var session = SessionState(
+                id: sessionId,
+                projectPath: normalized,
+                projectName: projectName,
+                permissionMode: "opencode-ralph",
+                startTime: state.startDate ?? Date(),
+                lastActivityTime: Date()
+            )
+            session.isActive = state.active
+            session.openCodeRalphState = state
+
+            sessions[sessionId] = session
+        }
+
+        if !isProjectPinned(path) {
+            pinProjectPath(path)
+        }
+
+        isIdle = false
+        lastActivityTime = Date()
+    }
+
+    /// Ensure a session exists for a Claude Code Ralph loop
+    func ensureClaudeCodeRalphSession(forProjectPath path: String, state: ClaudeCodeRalphState) {
+        let normalized = normalizePath(path)
+        let existingSession = sessions.values.first { normalizePath($0.projectPath) == normalized }
+
+        if let existingSession = existingSession {
+            if existingSession.claudeCodeRalphState != state {
+                sessions[existingSession.id]?.claudeCodeRalphState = state
+                sessions[existingSession.id]?.isActive = state.isActive
+                sessions[existingSession.id]?.lastActivityTime = Date()
+            }
+        } else {
+            let projectName = URL(fileURLWithPath: path).lastPathComponent
+            let sessionId = "claude-ralph-\(UUID().uuidString)"
+
+            var session = SessionState(
+                id: sessionId,
+                projectPath: normalized,
+                projectName: projectName,
+                permissionMode: "claude-ralph",
+                startTime: state.timestampDate ?? Date(),
+                lastActivityTime: Date()
+            )
+            session.isActive = state.isActive
+            session.claudeCodeRalphState = state
+
+            sessions[sessionId] = session
+        }
+
+        if !isProjectPinned(path) {
+            pinProjectPath(path)
+        }
+
+        isIdle = false
+        lastActivityTime = Date()
     }
 }
 

@@ -94,6 +94,16 @@
         "Churning", "Synthesizing", "Crystallizing", "Untangling", "Weaving"
       ]
     },
+    "ralphing": {
+      "color": "purple",
+      "pattern": "loop",
+      "displayName": "Ralphing",
+      "noTimeout": true,
+      "funVerbs": [
+        "Ralphing", "Iterating", "Cycling", "Refining", "Converging",
+        "Recursing", "Spiraling", "Evolving", "Progressing", "Advancing"
+      ]
+    },
     "waiting":  { "category": "interact", "displayName": "Waiting" },
     "idle":     { "color": "slate", "pattern": "dormant", "displayName": "Idle" }
   },
@@ -157,6 +167,12 @@
       "mode": "static",
       "sequence": [[0,5]],
       "interval": 0
+    },
+    "loop": {
+      "description": "Circular cycling pattern for Ralph loops",
+      "mode": "sequence",
+      "sequence": [[0], [1], [2], [5], [4], [3]],
+      "interval": 0.1
     }
   },
 
