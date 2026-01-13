@@ -167,7 +167,7 @@ struct SessionCard: View {
             // Ralph loop iteration (shown when in loop, before context percent)
             if isInRalphLoop, let iteration = ralphIterationDisplay {
                 HStack(spacing: 3) {
-                    Image(systemName: "arrow.trianglehead.2.counterclockwise.rotate.90")
+                    Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundColor(ralphColor)
                     Text(iteration)
