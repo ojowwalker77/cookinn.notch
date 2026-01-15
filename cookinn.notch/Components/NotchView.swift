@@ -105,16 +105,23 @@ struct SessionCard: View {
 
     private var isThinking: Bool {
         guard let session = session else { return false }
-        return session.isActive && session.activeTool == nil && !session.isWaitingForPermission
+        return session.isActive && session.activeTool == nil && !session.isWaitingForPermission && !session.isWaitingForInput
     }
 
     private var isWaitingForPermission: Bool {
         session?.isWaitingForPermission ?? false
     }
 
+    private var isWaitingForInput: Bool {
+        session?.isWaitingForInput ?? false
+    }
+
     private var activeColor: Color {
         if isWaitingForPermission {
-            return .red  // Urgent attention - waiting for user
+            return .red  // Urgent attention - waiting for user permission
+        }
+        if isWaitingForInput {
+            return .yellow  // Waiting for user input (idle prompt)
         }
         // Ralph loop colors: Orange for Claude Code, Purple for OpenCode
         if isInRalphLoop {
@@ -164,6 +171,17 @@ struct SessionCard: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            // Agent type badge (e.g., "Plan", "Explore") - shown first
+            if let agentType = session?.agentTypeDisplay {
+                Text(agentType)
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(Color.blue.opacity(0.7))
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+            }
+
             // Ralph loop iteration (shown when in loop, before context percent)
             if isInRalphLoop, let iteration = ralphIterationDisplay {
                 HStack(spacing: 3) {
@@ -176,7 +194,14 @@ struct SessionCard: View {
                 }
             }
 
-            // Context percentage (far left, only show when > 0)
+            // Cost display (v2.1.6+)
+            if let cost = session?.formattedCost {
+                Text(cost)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundColor(.green.opacity(0.8))
+            }
+
+            // Context percentage (only show when > 0)
             if contextPercent > 0 {
                 Text("\(Int(contextPercent))%")
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
@@ -184,8 +209,8 @@ struct SessionCard: View {
                     .frame(width: 28, alignment: .trailing)
             }
 
-            // Show pulsing dot when waiting, otherwise show activity indicator
-            if isWaitingForPermission {
+            // Show pulsing dot when waiting (permission or input), otherwise show activity indicator
+            if isWaitingForPermission || isWaitingForInput {
                 WaitingPulseIndicator(color: activeColor)
                     .frame(width: 20, height: 14)
             } else {
@@ -235,7 +260,16 @@ struct SessionCard: View {
         .onChange(of: session?.isWaitingForPermission) { _, isWaiting in
             if isWaiting == true {
                 startPulseAnimation()
-            } else {
+            } else if session?.isWaitingForInput != true {
+                // Only stop if not also waiting for input
+                stopPulseAnimation()
+            }
+        }
+        .onChange(of: session?.isWaitingForInput) { _, isWaiting in
+            if isWaiting == true {
+                startPulseAnimation()
+            } else if session?.isWaitingForPermission != true {
+                // Only stop if not also waiting for permission
                 stopPulseAnimation()
             }
         }
@@ -245,7 +279,7 @@ struct SessionCard: View {
                 currentFunVerb = ConfigManager.shared.randomFunVerb(for: "thinking") ?? "Thinking"
             }
             startTimers()
-            if isWaitingForPermission {
+            if isWaitingForPermission || isWaitingForInput {
                 startPulseAnimation()
             }
         }
@@ -358,6 +392,10 @@ struct SessionCard: View {
             return "Waiting"
         }
 
+        if session.isWaitingForInput {
+            return "Input"
+        }
+
         if let tool = session.activeTool {
             return tool.displayName
         }
@@ -379,9 +417,12 @@ struct SessionCard: View {
     }
 
     private var verbColor: Color {
-        // Waiting state gets full red attention
+        // Waiting states get full attention
         if session?.isWaitingForPermission == true {
-            return activeColor  // Red for waiting
+            return activeColor  // Red for permission waiting
+        }
+        if session?.isWaitingForInput == true {
+            return activeColor  // Yellow for input waiting
         }
 
         guard session?.isActive == true || session?.activeTool != nil else {

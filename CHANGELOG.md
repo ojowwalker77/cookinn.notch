@@ -2,6 +2,19 @@
 
 All notable changes to cookinn.notch will be documented in this file.
 
+## [1.9] - 2025-01-15
+
+### Added
+- **Claude Code v2.1.6+ support**: Native status line fields integration
+  - Agent type badge: Shows "Plan", "Explore" etc. when using `--agent` flag
+  - Cost display: Session cost shown in green (<1¢, 5¢, $1.23 format)
+  - Model info tracking (modelId, modelDisplayName)
+- **Idle prompt indicator**: Yellow pulsing indicator when Claude is waiting for user input (vs red for permission prompts)
+- Native `context_window.used_percentage` support (falls back to transcript parsing for older versions)
+
+### Changed
+- Hook script now uses `jq` for JSON construction (safer escaping, prevents broken payloads from special characters in tool outputs)
+
 ## [1.8] - 2025-01-13
 
 ### Added

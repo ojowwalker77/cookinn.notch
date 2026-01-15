@@ -98,9 +98,19 @@ struct HookPayload: Codable {
     // Token usage (from Stop events)
     let usage: TokenUsage?
 
-    // Context window tracking (from transcript JSONL parsing)
+    // Context window tracking (from transcript JSONL parsing or native v2.1.6+)
     let contextTokens: Int?
     let contextPercent: Double?
+
+    // Agent type (v2.1.2+ - Plan, Explore, etc when --agent used)
+    let agentType: String?
+
+    // Model info (v2.1.6+)
+    let modelId: String?
+    let modelDisplayName: String?
+
+    // Cost tracking (v2.1.6+)
+    let costUsd: Double?
 
     // Claude Code sends camelCase JSON keys
     enum CodingKeys: String, CodingKey {
@@ -123,6 +133,10 @@ struct HookPayload: Codable {
         case usage
         case contextTokens
         case contextPercent
+        case agentType
+        case modelId
+        case modelDisplayName
+        case costUsd
     }
 }
 
@@ -343,6 +357,7 @@ struct SessionState: Identifiable, Equatable {
     var recentTools: [ActiveTool] = []
     var isActive: Bool = false  // Only true when Claude is actively responding
     var isWaitingForPermission: Bool = false  // True when Claude needs user permission (e.g., Bash)
+    var isWaitingForInput: Bool = false  // True when Claude is idle waiting for user input (idle_prompt)
 
     // Token tracking
     var totalInputTokens: Int = 0
@@ -350,9 +365,19 @@ struct SessionState: Identifiable, Equatable {
     var totalCacheCreationTokens: Int = 0
     var totalCacheReadTokens: Int = 0
 
-    // Context window tracking (from transcript JSONL - more accurate)
+    // Context window tracking (from transcript JSONL or native v2.1.6+)
     var contextPercent: Double = 0.0
     var contextTokens: Int = 0
+
+    // Agent type (v2.1.2+ - Plan, Explore, etc)
+    var agentType: String?
+
+    // Model info (v2.1.6+)
+    var modelId: String?
+    var modelDisplayName: String?
+
+    // Cost tracking (v2.1.6+)
+    var costUsd: Double = 0.0
 
     // Ralph Loop tracking - supports both OpenCode and Claude Code Ralph
     var openCodeRalphState: OpenCodeRalphState?
@@ -390,10 +415,33 @@ struct SessionState: Identifiable, Equatable {
         if isWaitingForPermission {
             return "Waiting"
         }
+        if isWaitingForInput {
+            return "Input"
+        }
         if let tool = activeTool {
             return tool.displayName
         }
         return isActive ? "Thinking" : "Idle"
+    }
+
+    /// Formatted cost display (e.g., "<1¢", "5¢", "$1.23")
+    var formattedCost: String? {
+        guard costUsd > 0 else { return nil }
+        let cents = costUsd * 100
+        if cents < 1 {
+            return "<1¢"
+        } else if cents < 100 {
+            return String(format: "%.0f¢", cents)
+        } else {
+            return String(format: "$%.2f", costUsd)
+        }
+    }
+
+    /// Display name for agent type (e.g., "Plan", "Explore")
+    var agentTypeDisplay: String? {
+        guard let type = agentType, !type.isEmpty else { return nil }
+        // Capitalize first letter
+        return type.prefix(1).uppercased() + type.dropFirst()
     }
 
     // Token stats
@@ -417,8 +465,11 @@ struct SessionState: Identifiable, Equatable {
         lhs.activeTool == rhs.activeTool &&
         lhs.isActive == rhs.isActive &&
         lhs.isWaitingForPermission == rhs.isWaitingForPermission &&
+        lhs.isWaitingForInput == rhs.isWaitingForInput &&
         lhs.lastActivityTime == rhs.lastActivityTime &&
         lhs.contextPercent == rhs.contextPercent &&
+        lhs.agentType == rhs.agentType &&
+        lhs.costUsd == rhs.costUsd &&
         lhs.openCodeRalphState == rhs.openCodeRalphState &&
         lhs.claudeCodeRalphState == rhs.claudeCodeRalphState
     }
@@ -641,13 +692,31 @@ final class NotchState: ObservableObject {
         let sessionId = payload.sessionId
         let now = Date()
 
-        // Update context window tracking on every event (from transcript JSONL parsing)
+        // Update context window tracking on every event (from transcript JSONL or native v2.1.6+)
         if let pct = payload.contextPercent, pct > 0 {
             if var session = sessions[sessionId] {
                 session.contextPercent = pct
                 session.contextTokens = payload.contextTokens ?? 0
                 sessions[sessionId] = session
             }
+        }
+
+        // Update model info when available (v2.1.6+)
+        if let modelId = payload.modelId, !modelId.isEmpty {
+            sessions[sessionId]?.modelId = modelId
+        }
+        if let modelDisplayName = payload.modelDisplayName, !modelDisplayName.isEmpty {
+            sessions[sessionId]?.modelDisplayName = modelDisplayName
+        }
+
+        // Update cost tracking when available (v2.1.6+)
+        if let cost = payload.costUsd, cost > 0 {
+            sessions[sessionId]?.costUsd = cost
+        }
+
+        // Update agent type when available (v2.1.2+)
+        if let agentType = payload.agentType, !agentType.isEmpty {
+            sessions[sessionId]?.agentType = agentType
         }
 
         // Clear waiting state on ANY event except Notification (which sets it)
@@ -813,16 +882,21 @@ final class NotchState: ObservableObject {
     }
 
     private func handleNotification(_ payload: HookPayload, sessionId: String) {
-        // Check for permission prompt notifications (strict matching to avoid false positives)
         let notifType = payload.notificationType?.lowercased() ?? ""
+
+        // Check for permission prompt notifications (strict matching to avoid false positives)
         let isPermissionPrompt = notifType == "permission_prompt" ||
                                  notifType == "permission_required"
+
+        // Check for idle prompt (Claude waiting for user input, v2.1.x+)
+        let isIdlePrompt = notifType == "idle_prompt"
 
         if isPermissionPrompt {
             if var session = sessions[sessionId] {
                 // Only trigger if not already waiting (prevent repeated sounds)
                 let wasWaiting = session.isWaitingForPermission
                 session.isWaitingForPermission = true
+                session.isWaitingForInput = false  // Clear other waiting state
                 session.isActive = false  // Claude is blocked waiting
                 sessions[sessionId] = session
 
@@ -830,6 +904,14 @@ final class NotchState: ObservableObject {
                 if !wasWaiting {
                     AudioManager.shared.startWaitingAlerts()
                 }
+            }
+        } else if isIdlePrompt {
+            // Claude is idle and waiting for user input (60s+ idle)
+            if var session = sessions[sessionId] {
+                session.isWaitingForInput = true
+                session.isWaitingForPermission = false
+                session.isActive = false
+                sessions[sessionId] = session
             }
         }
     }
@@ -842,6 +924,7 @@ final class NotchState: ObservableObject {
             let wasWaiting = session.isWaitingForPermission
             session.isActive = true
             session.isWaitingForPermission = false  // User responded, clear waiting state
+            session.isWaitingForInput = false  // Clear idle prompt state too
             session.lastActivityTime = now
             sessions[sessionId] = session
 
@@ -904,7 +987,7 @@ final class NotchState: ObservableObject {
                 if sessions[id]?.isActive == true {
                     sessions[id]?.isActive = false
                 }
-                // Clear waiting state too - in case notification got stuck
+                // Clear waiting states too - in case notification got stuck
                 if sessions[id]?.isWaitingForPermission == true {
                     sessions[id]?.isWaitingForPermission = false
                     // Stop any lingering alerts
@@ -913,9 +996,12 @@ final class NotchState: ObservableObject {
                         AudioManager.shared.stopWaitingAlerts()
                     }
                 }
+                if sessions[id]?.isWaitingForInput == true {
+                    sessions[id]?.isWaitingForInput = false
+                }
             }
 
-            let isInactive = !session.isActive && session.activeTool == nil && !session.isWaitingForPermission
+            let isInactive = !session.isActive && session.activeTool == nil && !session.isWaitingForPermission && !session.isWaitingForInput
             let isPinned = isProjectPinned(session.projectPath)
 
             // Remove completely stale sessions based on pinned status:
