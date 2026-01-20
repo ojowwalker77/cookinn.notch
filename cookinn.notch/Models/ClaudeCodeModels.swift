@@ -983,8 +983,14 @@ final class NotchState: ObservableObject {
                 if sessions[id]?.activeTool != nil {
                     sessions[id]?.activeTool = nil
                 }
+                // Check if session is in "thinking" state (isActive but no tool/waiting)
+                // Thinking state has noTimeout=true, so don't clear isActive for it
+                let isThinking = session.isActive && session.activeTool == nil &&
+                                 !session.isWaitingForPermission && !session.isWaitingForInput
+
                 // Also clear isActive - handles interrupt case where Stop hook doesn't fire
-                if sessions[id]?.isActive == true {
+                // BUT skip if in thinking state (thinking has noTimeout)
+                if sessions[id]?.isActive == true && !isThinking {
                     sessions[id]?.isActive = false
                 }
                 // Clear waiting states too - in case notification got stuck
