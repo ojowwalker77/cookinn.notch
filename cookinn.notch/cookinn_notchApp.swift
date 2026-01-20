@@ -127,6 +127,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showRalphLoopsItem.state = NotchState.shared.showRalphLoops ? .on : .off
         menu.addItem(showRalphLoopsItem)
 
+        let listenPlanItem = NSMenuItem(title: "Listen to Plan", action: #selector(toggleListenPlan), keyEquivalent: "")
+        listenPlanItem.tag = 107
+        listenPlanItem.state = NotchState.shared.listenPlanEnabled ? .on : .off
+        menu.addItem(listenPlanItem)
+
+        let elevenLabsItem = NSMenuItem(title: "ElevenLabs API Key...", action: #selector(showElevenLabsAPIKeyDialog), keyEquivalent: "")
+        elevenLabsItem.tag = 106
+        menu.addItem(elevenLabsItem)
+
         menu.addItem(NSMenuItem.separator())
 
         let statusMenuItem = NSMenuItem(title: "Status: Starting...", action: nil, keyEquivalent: "")
@@ -289,7 +298,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         window.isMovableByWindowBackground = false
         window.hasShadow = false
-        window.ignoresMouseEvents = true  // Click-through
+        window.ignoresMouseEvents = false  // Enable mouse events for TTS button
 
         // Position at TOP-RIGHT of this screen, below menu bar
         let menuBarHeight = screenFrame.maxY - screen.visibleFrame.maxY
@@ -399,7 +408,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isIdle in
                 guard let self = self else { return }
-                if isIdle {
+                // Don't hide if any session has plan content available to read
+                let hasPlanContent = NotchState.shared.sessions.values.contains {
+                    $0.lastPlanContent != nil && !$0.lastPlanContent!.isEmpty
+                }
+                if isIdle && !hasPlanContent {
                     self.notchWindows.values.forEach { $0.orderOut(nil) }
                 } else {
                     self.notchWindows.values.forEach { $0.orderFrontRegardless() }
@@ -574,6 +587,53 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    @objc func toggleListenPlan() {
+        NotchState.shared.listenPlanEnabled.toggle()
+
+        // Update menu item checkmark
+        if let menu = statusItem?.menu,
+           let item = menu.item(withTag: 107) {
+            item.state = NotchState.shared.listenPlanEnabled ? .on : .off
+        }
+    }
+
+    @objc func showElevenLabsAPIKeyDialog() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+
+        let existingKey = KeychainManager.getAPIKey()
+        let hasKey = existingKey != nil && !existingKey!.isEmpty
+
+        if hasKey {
+            alert.messageText = "ElevenLabs API Key"
+            alert.informativeText = "API key is configured (••••••••). Clear it to use the built-in macOS voice instead."
+            alert.addButton(withTitle: "Keep")
+            alert.addButton(withTitle: "Clear")
+
+            let response = alert.runModal()
+            if response == .alertSecondButtonReturn {
+                KeychainManager.deleteAPIKey()
+            }
+        } else {
+            alert.messageText = "Enter ElevenLabs API Key"
+            alert.informativeText = "Enter your ElevenLabs API key for high-quality TTS. Leave empty to use the built-in macOS voice."
+            alert.addButton(withTitle: "Save")
+            alert.addButton(withTitle: "Cancel")
+
+            let textField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+            textField.placeholderString = "sk-..."
+            alert.accessoryView = textField
+
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                let key = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !key.isEmpty {
+                    _ = KeychainManager.saveAPIKey(key)
+                }
+            }
+        }
+    }
+
     @objc func showSetup() {
         showOnboardingWindow()
     }
@@ -618,8 +678,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func showOnboardingWindow() {
-        // Don't show multiple
-        if onboardingWindow != nil { return }
+        // If window exists and is visible, just bring to front
+        if let existing = onboardingWindow {
+            if existing.isVisible {
+                existing.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                return
+            }
+            // Window exists but not visible - clean up stale reference
+            onboardingWindow = nil
+        }
 
         let onboardingView = OnboardingView(
             setupManager: SetupManager.shared,

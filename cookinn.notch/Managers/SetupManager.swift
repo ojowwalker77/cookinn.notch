@@ -52,7 +52,7 @@ final class SetupManager: ObservableObject {
     private let claudeSettings = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude/settings.json")
 
-    // Hook types to register in settings.json
+    // Hook types to register in settings.json (no matcher = match all)
     private let hookTypes = [
         "PreToolUse",
         "PostToolUse",
@@ -62,6 +62,11 @@ final class SetupManager: ObservableObject {
         "SessionStart",
         "SessionEnd",
         "UserPromptSubmit"
+    ]
+
+    // Hook types that need specific matchers
+    private let matchedHookTypes: [(type: String, matcher: String)] = [
+        ("PermissionRequest", "ExitPlanMode")
     ]
 
     private init() {}
@@ -296,6 +301,33 @@ final class SetupManager: ObservableObject {
             }
         }
 
+        // Add hooks with specific matchers (e.g., PermissionRequest for ExitPlanMode)
+        for matched in matchedHookTypes {
+            var existingHooks = hooks[matched.type] as? [[String: Any]] ?? []
+
+            // Check if our hook with this matcher is already registered
+            let alreadyExists = existingHooks.contains { entry in
+                guard entry["matcher"] as? String == matched.matcher else { return false }
+                if let hookObjects = entry["hooks"] as? [[String: Any]] {
+                    return hookObjects.contains { obj in
+                        (obj["command"] as? String) == ourHookPath
+                    }
+                }
+                return false
+            }
+
+            if !alreadyExists {
+                let matchedHookEntry: [String: Any] = [
+                    "matcher": matched.matcher,
+                    "hooks": [
+                        ["type": "command", "command": ourHookPath]
+                    ]
+                ]
+                existingHooks.append(matchedHookEntry)
+                hooks[matched.type] = existingHooks
+            }
+        }
+
         settings["hooks"] = hooks
 
         // Write updated settings
@@ -315,24 +347,50 @@ final class SetupManager: ObservableObject {
         }
 
         // Check if any hook array contains our path (handle both new object and legacy string formats)
+        var hasBasicHooks = false
         for (_, value) in hooks {
             if let hookArray = value as? [[String: Any]] {
                 for hook in hookArray {
                     // Check new object format
                     if let hookObjects = hook["hooks"] as? [[String: Any]] {
                         if hookObjects.contains(where: { ($0["command"] as? String)?.contains("cookinn-notch") == true }) {
-                            return true
+                            hasBasicHooks = true
+                            break
                         }
                     }
                     // Check legacy string format
                     if let hookPaths = hook["hooks"] as? [String],
                        hookPaths.contains(where: { $0.contains("cookinn-notch") }) {
-                        return true
+                        hasBasicHooks = true
+                        break
                     }
                 }
             }
+            if hasBasicHooks { break }
         }
-        return false
+
+        guard hasBasicHooks else { return false }
+
+        // Also check that matched hooks (like PermissionRequest/ExitPlanMode) are configured
+        for matched in matchedHookTypes {
+            guard let hookArray = hooks[matched.type] as? [[String: Any]] else {
+                return false  // Missing hook type entirely
+            }
+
+            let hasMatchedHook = hookArray.contains { entry in
+                guard entry["matcher"] as? String == matched.matcher else { return false }
+                if let hookObjects = entry["hooks"] as? [[String: Any]] {
+                    return hookObjects.contains { ($0["command"] as? String)?.contains("cookinn-notch") == true }
+                }
+                return false
+            }
+
+            if !hasMatchedHook {
+                return false  // Missing this specific matched hook
+            }
+        }
+
+        return true
     }
 
     private func installClaudeCommands() throws {

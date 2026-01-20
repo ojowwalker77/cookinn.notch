@@ -90,6 +90,7 @@ struct HookPayload: Codable {
     let source: String?
     let reason: String?
     let message: String?
+    let planContent: String?
     let notificationType: String?
     let prompt: String?
     let stopHookActive: Bool?
@@ -126,6 +127,7 @@ struct HookPayload: Codable {
         case source
         case reason
         case message
+        case planContent
         case notificationType
         case prompt
         case stopHookActive
@@ -344,6 +346,15 @@ struct ToolResponse: Equatable {
     }
 }
 
+// MARK: - Plan Reading State
+
+enum PlanReadingState: Equatable {
+    case none
+    case loading  // Waiting for ElevenLabs response
+    case playing
+    case paused
+}
+
 // MARK: - Session State
 
 struct SessionState: Identifiable, Equatable {
@@ -382,6 +393,10 @@ struct SessionState: Identifiable, Equatable {
     // Ralph Loop tracking - supports both OpenCode and Claude Code Ralph
     var openCodeRalphState: OpenCodeRalphState?
     var claudeCodeRalphState: ClaudeCodeRalphState?
+
+    // Plan TTS reading
+    var lastPlanContent: String?
+    var planReadingState: PlanReadingState = .none
 
     /// Whether this session is in a Ralph loop (either type)
     var isInRalphLoop: Bool {
@@ -471,7 +486,9 @@ struct SessionState: Identifiable, Equatable {
         lhs.agentType == rhs.agentType &&
         lhs.costUsd == rhs.costUsd &&
         lhs.openCodeRalphState == rhs.openCodeRalphState &&
-        lhs.claudeCodeRalphState == rhs.claudeCodeRalphState
+        lhs.claudeCodeRalphState == rhs.claudeCodeRalphState &&
+        lhs.lastPlanContent == rhs.lastPlanContent &&
+        lhs.planReadingState == rhs.planReadingState
     }
 }
 
@@ -547,6 +564,7 @@ final class NotchState: ObservableObject {
     private static let selectedDisplayIDKey = "NotchSelectedDisplayID"
     private static let alertSoundsEnabledKey = "NotchAlertSoundsEnabled"
     private static let showRalphLoopsKey = "NotchShowRalphLoops"
+    private static let listenPlanEnabledKey = "NotchListenPlanEnabled"
     private var isLoadingSettings = false
 
     // Settings
@@ -568,6 +586,13 @@ final class NotchState: ObservableObject {
         didSet {
             guard !isLoadingSettings else { return }
             UserDefaults.standard.set(showRalphLoops, forKey: Self.showRalphLoopsKey)
+        }
+    }
+
+    @Published var listenPlanEnabled: Bool = false {
+        didSet {
+            guard !isLoadingSettings else { return }
+            UserDefaults.standard.set(listenPlanEnabled, forKey: Self.listenPlanEnabledKey)
         }
     }
 
@@ -677,6 +702,13 @@ final class NotchState: ObservableObject {
             showRalphLoops = true  // Default enabled
         }
 
+        // Load listen plan enabled setting (default to false if not set)
+        if UserDefaults.standard.object(forKey: Self.listenPlanEnabledKey) != nil {
+            listenPlanEnabled = UserDefaults.standard.bool(forKey: Self.listenPlanEnabledKey)
+        } else {
+            listenPlanEnabled = false  // Default disabled
+        }
+
         isLoadingSettings = false
     }
 
@@ -760,6 +792,9 @@ final class NotchState: ObservableObject {
         case "UserPromptSubmit":
             handleUserPrompt(payload, sessionId: sessionId, now: now)
 
+        case "PermissionRequest":
+            handlePermissionRequest(payload, sessionId: sessionId)
+
         default:
             break
         }
@@ -769,6 +804,14 @@ final class NotchState: ObservableObject {
         ensureSession(payload, sessionId: sessionId, now: now)
 
         guard let toolName = payload.toolName, !toolName.isEmpty else { return }
+
+        // Capture plan content from ExitPlanMode (PreToolUse has tool_input.plan)
+        if toolName == "ExitPlanMode",
+           let planContent = payload.planContent,
+           !planContent.isEmpty {
+            sessions[sessionId]?.lastPlanContent = planContent
+            sessions[sessionId]?.planReadingState = .none
+        }
 
         // Check if we were waiting (to stop alerts)
         let wasWaiting = sessions[sessionId]?.isWaitingForPermission ?? false
@@ -816,6 +859,13 @@ final class NotchState: ObservableObject {
                     session.recentTools.removeLast()
                 }
 
+                // Clear plan content when ExitPlanMode completes (user approved/rejected)
+                if tool.name == "ExitPlanMode" {
+                    TTSManager.shared.stop()
+                    session.lastPlanContent = nil
+                    session.planReadingState = .none
+                }
+
                 // Only clear if this was the active tool
                 session.activeTool = nil
             }
@@ -834,6 +884,13 @@ final class NotchState: ObservableObject {
             session.isActive = false  // Stop hook = idle, no other scenario
             session.isWaitingForPermission = false  // Clear waiting on stop (user rejected or responded)
             session.lastActivityTime = now
+
+            // Clear plan content on Stop (covers rejection case where PostToolUse never fires)
+            if session.lastPlanContent != nil {
+                TTSManager.shared.stop()
+                session.lastPlanContent = nil
+                session.planReadingState = .none
+            }
 
             // Accumulate token usage
             if let usage = payload.usage {
@@ -922,6 +979,14 @@ final class NotchState: ObservableObject {
         // Mark session as active when user submits a prompt
         if var session = sessions[sessionId] {
             let wasWaiting = session.isWaitingForPermission
+
+            // Clear plan content when user submits new prompt (plan approved/rejected)
+            if session.lastPlanContent != nil {
+                TTSManager.shared.stop()
+                session.lastPlanContent = nil
+                session.planReadingState = .none
+            }
+
             session.isActive = true
             session.isWaitingForPermission = false  // User responded, clear waiting state
             session.isWaitingForInput = false  // Clear idle prompt state too
@@ -941,6 +1006,19 @@ final class NotchState: ObservableObject {
         // Mark as active
         lastActivityTime = now
         isIdle = false
+    }
+
+    private func handlePermissionRequest(_ payload: HookPayload, sessionId: String) {
+        // Ensure session exists
+        ensureSession(payload, sessionId: sessionId, now: Date())
+
+        // Handle ExitPlanMode permission request - capture plan content for TTS
+        if payload.toolName == "ExitPlanMode",
+           let planContent = payload.planContent,
+           !planContent.isEmpty {
+            sessions[sessionId]?.lastPlanContent = planContent
+            sessions[sessionId]?.planReadingState = .none
+        }
     }
 
     private func ensureSession(_ payload: HookPayload, sessionId: String, now: Date) {

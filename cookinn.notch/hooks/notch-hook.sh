@@ -26,6 +26,8 @@ PERMISSION_MODE=$(echo "$INPUT" | jq -r '.permission_mode // "default"' 2>/dev/n
 SOURCE=$(echo "$INPUT" | jq -r '.source // ""' 2>/dev/null || echo "")
 REASON=$(echo "$INPUT" | jq -r '.reason // ""' 2>/dev/null || echo "")
 MESSAGE=$(echo "$INPUT" | jq -r '.message // ""' 2>/dev/null || echo "")
+# Plan content (from ExitPlanMode tool_input.plan in PermissionRequest hook)
+PLAN_CONTENT=$(echo "$INPUT" | jq -r '.tool_input.plan // ""' 2>/dev/null || echo "")
 # Notification hook fields
 NOTIFICATION_TYPE=$(echo "$INPUT" | jq -r '.notification_type // ""' 2>/dev/null || echo "")
 
@@ -100,6 +102,7 @@ PAYLOAD=$(jq -n \
   --arg source "$SOURCE" \
   --arg reason "$REASON" \
   --arg message "$MESSAGE" \
+  --arg planContent "$PLAN_CONTENT" \
   --arg notificationType "$NOTIFICATION_TYPE" \
   --arg agentType "$AGENT_TYPE" \
   --arg modelId "$MODEL_ID" \
@@ -122,6 +125,7 @@ PAYLOAD=$(jq -n \
     source: $source,
     reason: $reason,
     message: $message,
+    planContent: $planContent,
     notificationType: $notificationType,
     agentType: $agentType,
     modelId: $modelId,
