@@ -2,6 +2,11 @@
 
 All notable changes to cookinn.notch will be documented in this file.
 
+## [1.10] - 2025-01-20
+
+### Fixed
+- **Early idle timeout**: Sessions in "thinking" state no longer timeout after 60 seconds. Thinking state now correctly respects `noTimeout: true` config, allowing Claude to think indefinitely without the pill going idle.
+
 ## [1.9] - 2025-01-15
 
 ### Added
