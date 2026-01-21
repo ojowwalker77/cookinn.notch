@@ -66,17 +66,36 @@ struct NotchView: View {
         state.hoveredDisplayIDs.contains(displayID) ? 0.05 : 1.0
     }
 
+    // Find all sessions with plan content available (only if listen plan is enabled)
+    private var sessionsWithPlans: [SessionState] {
+        guard state.listenPlanEnabled else { return [] }
+        return state.sessions.values.filter {
+            $0.lastPlanContent != nil && !$0.lastPlanContent!.isEmpty
+        }.sorted { $0.lastActivityTime > $1.lastActivityTime }
+    }
+
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
+            // Plan pills row (shown alongside session cards, not replacing them)
+            if !sessionsWithPlans.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(sessionsWithPlans) { session in
+                        PlanPill(session: session)
+                    }
+                }
+            }
+
+            // Normal session cards (always shown)
             ForEach(activeSessions) { session in
                 SessionCard(session: session)
             }
+            .opacity(opacity)  // Session cards fade on hover
 
-            if activeSessions.isEmpty {
+            if activeSessions.isEmpty && sessionsWithPlans.isEmpty {
                 SessionCard(session: nil)
+                    .opacity(opacity)
             }
         }
-        .opacity(opacity)
         .animation(.easeOut(duration: 0.15), value: opacity)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
@@ -114,6 +133,13 @@ struct SessionCard: View {
 
     private var isWaitingForInput: Bool {
         session?.isWaitingForInput ?? false
+    }
+
+    // Suppress waiting pulse if this session has a plan pill shown (the plan pill has its own pulse)
+    private var hasPlanPillShown: Bool {
+        guard NotchState.shared.listenPlanEnabled else { return false }
+        guard let planContent = session?.lastPlanContent else { return false }
+        return !planContent.isEmpty
     }
 
     private var activeColor: Color {
@@ -243,8 +269,9 @@ struct SessionCard: View {
             ContextBorder(percent: contextPercent, cornerRadius: cornerRadius, color: activeColor)
         )
         // Fast pulse animation on the whole pill when waiting for permission
-        .scaleEffect(isWaitingForPermission ? waitingPulseScale : 1.0)
-        .opacity(isWaitingForPermission ? waitingPulseOpacity : 1.0)
+        // Suppressed when plan pill is shown (plan pill has its own pulse)
+        .scaleEffect(isWaitingForPermission && !hasPlanPillShown ? waitingPulseScale : 1.0)
+        .opacity(isWaitingForPermission && !hasPlanPillShown ? waitingPulseOpacity : 1.0)
         .frame(maxWidth: .infinity, alignment: .trailing)
         .onChange(of: session?.isActive) { _, isActive in
             // Reset verb when thinking starts
@@ -258,18 +285,18 @@ struct SessionCard: View {
             updateTimers()
         }
         .onChange(of: session?.isWaitingForPermission) { _, isWaiting in
-            if isWaiting == true {
+            // Don't pulse if plan pill is shown (it has its own pulse)
+            if isWaiting == true && !hasPlanPillShown {
                 startPulseAnimation()
-            } else if session?.isWaitingForInput != true {
-                // Only stop if not also waiting for input
+            } else if session?.isWaitingForInput != true || hasPlanPillShown {
                 stopPulseAnimation()
             }
         }
         .onChange(of: session?.isWaitingForInput) { _, isWaiting in
-            if isWaiting == true {
+            // Don't pulse if plan pill is shown (it has its own pulse)
+            if isWaiting == true && !hasPlanPillShown {
                 startPulseAnimation()
-            } else if session?.isWaitingForPermission != true {
-                // Only stop if not also waiting for permission
+            } else if session?.isWaitingForPermission != true || hasPlanPillShown {
                 stopPulseAnimation()
             }
         }
@@ -279,7 +306,8 @@ struct SessionCard: View {
                 currentFunVerb = ConfigManager.shared.randomFunVerb(for: "thinking") ?? "Thinking"
             }
             startTimers()
-            if isWaitingForPermission || isWaitingForInput {
+            // Don't start pulse if plan pill is shown (it has its own pulse)
+            if (isWaitingForPermission || isWaitingForInput) && !hasPlanPillShown {
                 startPulseAnimation()
             }
         }
@@ -796,6 +824,233 @@ struct WaitingPulseIndicator: View {
                     pulsePhase = pulsePhase > 0.5 ? 0.0 : 1.0
                 }
             }
+    }
+}
+
+// MARK: - Plan Pill (dedicated TTS control that takes over the UI)
+
+struct PlanPill: View {
+    let session: SessionState
+    @ObservedObject var state = NotchState.shared
+    @ObservedObject var tts = TTSManager.shared
+
+    private let cornerRadius: CGFloat = 12
+    private let pillWidth: CGFloat = 240
+
+    private var isLoading: Bool {
+        session.planReadingState == .loading
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            // Top row: play/pause + progress bar + speed button
+            HStack(spacing: 10) {
+                // Play/Pause button (or spinner when loading)
+                Button(action: togglePlayback) {
+                    if isLoading {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.6)
+                    } else {
+                        Image(systemName: playIcon)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                }
+                .buttonStyle(.plain)
+                .frame(width: 24, height: 24)
+                .background(Color.blue.opacity(0.8))
+                .clipShape(Circle())
+                .disabled(isLoading)
+                .onHover { hovering in
+                    if hovering && !isLoading { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+
+                // Progress bar (slider)
+                Slider(value: progressBinding, in: 0...1)
+                    .tint(.blue)
+                    .frame(maxWidth: .infinity)
+                    .disabled(!tts.supportsAdvancedControls)
+                    .opacity(tts.supportsAdvancedControls ? 1.0 : 0.5)
+
+                // Speed button
+                Button(action: { tts.cycleRate() }) {
+                    Text(speedLabel)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.9))
+                }
+                .buttonStyle(.plain)
+                .frame(width: 32, height: 20)
+                .background(Color.white.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .disabled(!tts.supportsAdvancedControls)
+                .opacity(tts.supportsAdvancedControls ? 1.0 : 0.5)
+                .onHover { hovering in
+                    if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+            }
+
+            // Bottom row: label + dismiss
+            HStack {
+                Text("Listen to plan for \(session.projectName.isEmpty ? "session" : session.projectName)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.7))
+                    .lineLimit(1)
+
+                Spacer()
+
+                // Dismiss button
+                Button(action: dismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+                .frame(width: 18, height: 18)
+                .background(Color.white.opacity(0.1))
+                .clipShape(Circle())
+                .onHover { hovering in
+                    if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(width: pillWidth)
+        .background(Color.black)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(Color.blue.opacity(0.5), lineWidth: 1)
+        )
+        .onChange(of: tts.isLoading) { _, isLoading in
+            // Transition from loading to playing when TTS finishes loading
+            if !isLoading && session.planReadingState == .loading {
+                state.sessions[session.id]?.planReadingState = .playing
+            }
+        }
+    }
+
+    private var playIcon: String {
+        switch session.planReadingState {
+        case .loading: return "play.fill"  // Spinner shown instead
+        case .playing: return "pause.fill"
+        case .paused: return "play.fill"
+        case .none: return "play.fill"
+        }
+    }
+
+    private var speedLabel: String {
+        if tts.playbackRate == 1.0 { return "1x" }
+        return String(format: "%.2gx", tts.playbackRate)
+    }
+
+    private var progressBinding: Binding<Double> {
+        Binding(
+            get: { tts.progress },
+            set: { tts.seek(to: $0) }
+        )
+    }
+
+    private func togglePlayback() {
+        switch session.planReadingState {
+        case .none:
+            if let plan = session.lastPlanContent {
+                state.sessions[session.id]?.planReadingState = .loading
+                TTSManager.shared.speak(plan)
+            }
+        case .loading:
+            // Already loading, ignore
+            break
+        case .playing:
+            TTSManager.shared.pause()
+            state.sessions[session.id]?.planReadingState = .paused
+        case .paused:
+            TTSManager.shared.resume()
+            state.sessions[session.id]?.planReadingState = .playing
+        }
+    }
+
+    private func dismiss() {
+        TTSManager.shared.stop()
+        state.sessions[session.id]?.lastPlanContent = nil
+        state.sessions[session.id]?.planReadingState = .none
+    }
+}
+
+// MARK: - Read Plan Button (TTS control - legacy, kept for reference)
+
+struct ReadPlanButton: View {
+    let session: SessionState
+    @ObservedObject var state = NotchState.shared
+
+    var body: some View {
+        Button(action: toggle) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+                .foregroundColor(.white.opacity(0.8))
+        }
+        .buttonStyle(.plain)
+        .frame(width: 18, height: 18)
+        .background(Color.white.opacity(0.15))
+        .clipShape(Circle())
+        .onHover { hovering in
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+    }
+
+    private var icon: String {
+        switch session.planReadingState {
+        case .loading:
+            return "hourglass"  // Loading indicator
+        case .playing:
+            return "pause.fill"
+        case .paused:
+            return "play.fill"
+        case .none:
+            return "speaker.wave.2.fill"
+        }
+    }
+
+    private func toggle() {
+        switch session.planReadingState {
+        case .none:
+            if let plan = session.lastPlanContent {
+                state.sessions[session.id]?.planReadingState = .loading
+                TTSManager.shared.speak(plan)
+            }
+        case .loading:
+            // Already loading, ignore
+            break
+        case .playing:
+            TTSManager.shared.pause()
+            state.sessions[session.id]?.planReadingState = .paused
+        case .paused:
+            TTSManager.shared.resume()
+            state.sessions[session.id]?.planReadingState = .playing
+        }
+    }
+}
+
+// MARK: - Interactive Hosting View (custom hit-testing for click-through)
+
+class InteractiveHostingView<Content: View>: NSHostingView<Content> {
+    /// Regions that should receive mouse events (in window coordinates)
+    var hitTestRegions: [CGRect] = []
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Check if point is in any interactive region
+        for region in hitTestRegions {
+            if region.contains(point) {
+                return super.hitTest(point)
+            }
+        }
+        // Click-through everywhere else
+        return nil
     }
 }
 

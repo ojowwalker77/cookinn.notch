@@ -2,6 +2,22 @@
 
 All notable changes to cookinn.notch will be documented in this file.
 
+## [1.11] - 2025-01-20
+
+### Added
+- **Listen to Plan**: TTS playback for Claude's implementation plans when `ExitPlanMode` is triggered
+  - Dedicated plan pill with play/pause, progress slider, and speed controls (1x, 1.25x, 1.5x)
+  - ElevenLabs Flash v2.5 integration for high-quality voice (Rachel)
+  - Fallback to macOS `say` command (Karen voice) when no API key configured
+  - Markdown stripping for natural speech output
+- **ElevenLabs API Key** menu option for secure Keychain storage
+- **Listen to Plan** toggle in menu bar (disabled by default)
+- `PermissionRequest` hook with `ExitPlanMode` matcher to capture plan content
+
+### Changed
+- Notch window now accepts mouse events (for TTS controls)
+- Session cards suppress pulse animation when plan pill is active
+
 ## [1.10] - 2025-01-20
 
 ### Fixed
